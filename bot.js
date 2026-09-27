@@ -1,12 +1,9 @@
 require('dotenv').config();
 const Groq = require('groq-sdk');
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcodeTerminal = require('qrcode-terminal');
-const qrcode = require('qrcode'); // genera el QR como imagen para la web
 const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
-const puppeteer = require('puppeteer'); // fallback para resolver Chrome si no hay PUPPETEER_EXECUTABLE_PATH
+const { enviarMensajeTexto, marcarComoLeido } = require('./whatsappCloud');
 
 const { verificarYAgendarCita, cancelarCita, modificarCita, trabajadorEstaConectado } = require('./calendar');
 const { guardarCliente, registrarCitaAgendada, registrarCitaCancelada, registrarCitaModificada } = require('./clientes');
@@ -15,14 +12,13 @@ const botState = require('./botState');
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 // ============================================================
-// MVP de un solo trabajador por instancia del bot:
-// Cada trabajador corre su propia instancia de este bot (su propio
-// WhatsApp). Ya NO se pide el número por .env: se detecta solo
-// apenas se escanea el QR y whatsapp-web.js se conecta
-// (client.info.wid.user). Ese número es el que se usa como
-// identificador (telefono_bot) en Supabase.
+// Con la Cloud API el número del bot ya NO se detecta por QR:
+// es el número que TÚ registraste en Meta (o el de prueba).
+// Debe venir en las variables de entorno como TELEFONO_BOT,
+// en formato internacional sin "+" (ej. "573001234567"),
+// igual que se guarda en la tabla `trabajadores` de Supabase.
 // ============================================================
-let TELEFONO_BOT = null;
+const TELEFONO_BOT = process.env.TELEFONO_BOT;
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -37,7 +33,6 @@ let configCache = {
 // Función para cargar configuración de empresa y servicios desde Supabase
 async function cargarConfiguracionEmpresa(telefono_bot) {
     try {
-        // Si ya está en cache, retornar
         if (configCache.empresas[telefono_bot]) {
             return {
                 empresa: configCache.empresas[telefono_bot],
@@ -45,7 +40,6 @@ async function cargarConfiguracionEmpresa(telefono_bot) {
             };
         }
 
-        // Obtener trabajador con su empresa
         const { data: trabajador, error: trabajadorError } = await supabase
             .from('trabajadores')
             .select('empresa_id')
@@ -57,7 +51,6 @@ async function cargarConfiguracionEmpresa(telefono_bot) {
             return null;
         }
 
-        // Obtener empresa
         const { data: empresa, error: empresaError } = await supabase
             .from('empresas')
             .select('*')
@@ -69,7 +62,6 @@ async function cargarConfiguracionEmpresa(telefono_bot) {
             return null;
         }
 
-        // Obtener servicios de la empresa
         const { data: servicios, error: serviciosError } = await supabase
             .from('servicios')
             .select('*')
@@ -81,7 +73,6 @@ async function cargarConfiguracionEmpresa(telefono_bot) {
             return null;
         }
 
-        // Guardar en cache
         configCache.empresas[telefono_bot] = empresa;
         configCache.servicios[telefono_bot] = servicios || [];
 
@@ -97,18 +88,15 @@ async function cargarConfiguracionEmpresa(telefono_bot) {
     }
 }
 
-// Función para obtener lista de servicios formateada para el prompt del bot
 function obtenerServiciosParaPrompt(servicios) {
     if (!servicios || servicios.length === 0) {
         return '- Servicio básico: $0 COP (60 min)';
     }
-
-    return servicios.map(s => 
+    return servicios.map(s =>
         `- ${s.nombre}: $${s.precio.toLocaleString()} COP (${s.duracion_minutos} min). ${s.descripcion || ''}`
     ).join('\n');
 }
 
-// Función para limpiar cache (útil cuando se actualiza la configuración)
 function limpiarCacheConfiguracion(telefono_bot) {
     if (telefono_bot) {
         delete configCache.empresas[telefono_bot];
@@ -332,12 +320,6 @@ function validarArgsAntesDeEjecutar(functionName, functionArgs, userId, userName
 
 function formatDateSpanish(fechaISO) {
     try {
-        // fechaISO es una fecha de calendario pura "AAAA-MM-DD" (sin hora),
-        // así que NO debe pasar por new Date(fechaISO) + timeZone, porque
-        // eso la interpreta como instante UTC y al convertir a Bogotá (UTC-5)
-        // se corre un día hacia atrás (ej: "2026-07-09" mostraba "8 de julio").
-        // Parseamos los componentes a mano y formateamos en UTC para que
-        // no haya ningún corrimiento sin importar el huso horario del server.
         const [year, month, day] = fechaISO.split('-').map(Number);
         if (!year || !month || !day) return fechaISO;
         const date = new Date(Date.UTC(year, month - 1, day));
@@ -351,7 +333,7 @@ function formatDateSpanish(fechaISO) {
 function createHumanResponse(functionName, functionArgs, resultado, empresaConfig = null) {
     const nombre = functionArgs.nombre_cliente || 'amigo';
     const nombreEmpresa = empresaConfig?.nombre || 'Xheros Barber';
-    
+
     if (!resultado || typeof resultado.mensaje !== 'string') {
         return 'Lo siento, no pude procesar esa acción correctamente. ¿Puedes intentarlo de nuevo?';
     }
@@ -380,10 +362,9 @@ function createHumanResponse(functionName, functionArgs, resultado, empresaConfi
     }
 
     if (functionName === 'agendar_cita') {
-        // Usar mensaje de confirmación personalizado si existe
-        const mensajeConfirmacion = empresaConfig?.mensaje_confirmacion || 
+        const mensajeConfirmacion = empresaConfig?.mensaje_confirmacion ||
             '¡Perfecto {nombre}! Ya quedó agendada tu cita de {servicio} para el {fecha} a las {hora}. Te esperamos en {nombre_negocio}.';
-        
+
         return mensajeConfirmacion
             .replace('{nombre}', nombre)
             .replace('{servicio}', functionArgs.servicio)
@@ -391,15 +372,15 @@ function createHumanResponse(functionName, functionArgs, resultado, empresaConfi
             .replace('{hora}', functionArgs.hora)
             .replace('{nombre_negocio}', nombreEmpresa);
     }
-    
+
     if (functionName === 'cancelar_cita') {
         return `Listo ${nombre}, tu cita para el ${formatDateSpanish(functionArgs.fecha)} a las ${functionArgs.hora} ha sido cancelada. Si deseas agendar otra hora, con gusto te ayudo.`;
     }
-    
+
     if (functionName === 'modificar_cita') {
         return `Perfecto ${nombre}, tu cita se movió al ${formatDateSpanish(functionArgs.nueva_fecha)} a las ${functionArgs.nueva_hora}. Gracias por avisar.`;
     }
-    
+
     return resultado.mensaje;
 }
 
@@ -542,7 +523,6 @@ async function procesarLlamadaFuncion(functionName, functionArgs, telefono_bot, 
         }
     }
 
-    // Cargar configuración de empresa para respuesta personalizada
     const config = await cargarConfiguracionEmpresa(telefono_bot);
     let assistantResponse = createHumanResponse(functionName, functionArgs, resultado, config?.empresa);
     assistantResponse = sanitizeResponseText(assistantResponse) || resultado.mensaje;
@@ -636,95 +616,31 @@ const consultarDisponibilidadTool = {
     }
 };
 
-// ---------- Cliente de WhatsApp ----------
-// executablePath: en Docker, PUPPETEER_EXECUTABLE_PATH ya viene definido por el
-// Dockerfile apuntando al Chromium del sistema (/usr/bin/chromium). Si esa
-// variable no está presente (por ejemplo corriendo local sin Docker), caemos
-// a puppeteer.executablePath() como respaldo.
-const client = new Client({
-    authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
-    puppeteer: {
-        headless: true,
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(),
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--disable-gpu'
-        ]
-    }
-});
-
-client.on('qr', async (qr) => {
-    // Log en consola (por si lo corres directo en terminal)
-    qrcodeTerminal.generate(qr, { small: true });
-    console.log('📸 Escanea el código QR de arriba, o entra a /vincular.html para escanearlo desde el navegador.');
-
-    // Imagen para mostrar en la página web
+// ============================================================
+// Punto de entrada: se llama desde server.js cada vez que el
+// webhook de Meta recibe un mensaje de texto nuevo.
+// ============================================================
+async function procesarMensajeWhatsapp(telefonoCliente, textoMensaje, messageId) {
     try {
-        const dataUrl = await qrcode.toDataURL(qr);
-        botState.setQr(dataUrl);
-    } catch (err) {
-        console.error('❌ Error generando imagen QR:', err);
-    }
-});
+        if (!textoMensaje || textoMensaje.trim() === '') return;
 
-client.on('ready', async () => {
-    console.log('🚀 ¡Bot de citas está en línea y escuchando mensajes!');
+        console.log(`💬 Mensaje recibido de ${telefonoCliente}: ${textoMensaje}`);
 
-    // El número propio del WhatsApp que se acaba de conectar (el del barbero)
-    TELEFONO_BOT = client.info.wid.user;
-    botState.setWhatsappListo(TELEFONO_BOT);
-    console.log(`📱 WhatsApp conectado con el número: ${TELEFONO_BOT}`);
+        if (messageId) {
+            marcarComoLeido(messageId).catch(() => {});
+        }
 
-    // Cargar configuración de la empresa y servicios
-    const config = await cargarConfiguracionEmpresa(TELEFONO_BOT);
-    if (config) {
-        console.log(`✅ Empresa configurada: ${config.empresa.nombre}`);
-    } else {
-        console.warn(`⚠️  No se encontró configuración de empresa para ${TELEFONO_BOT}`);
-        console.warn(`   Ve a /admin.html para configurar tu negocio.`);
-    }
-
-    const conectado = await trabajadorEstaConectado(TELEFONO_BOT);
-    if (!conectado) {
-        botState.setCalendarConectado(false);
-        console.warn(`⚠️  ATENCIÓN: este número (${TELEFONO_BOT}) todavía NO ha conectado su Google Calendar.`);
-        console.warn(`   Ve a /vincular.html para conectarlo.`);
-    } else {
-        botState.setCalendarConectado(true, conectado.correo);
-        console.log(`✅ Calendario ya conectado: ${conectado.correo}`);
-    }
-});
-
-client.on('disconnected', () => {
-    console.warn('⚠️  WhatsApp se desconectó.');
-});
-
-client.on('message', async (msg) => {
-    if (msg.from.includes('@g.us') || msg.isStatus || !msg.body || msg.body.trim() === '') return;
-
-    try {
-        console.log(`💬 Mensaje recibido de ${msg.from}: ${msg.body}`);
-
-        const contact = await msg.getContact();
-        const phoneNumber = contact.number;
-        const userId = phoneNumber || msg.from;
-
+        const userId = telefonoCliente;
         const userName = getUserName(userId);
 
         if (!userName && isFirstConversation(userId)) {
-            // Cargar configuración para obtener mensaje de bienvenida personalizado
             const config = await cargarConfiguracionEmpresa(TELEFONO_BOT);
             const nombreEmpresa = config?.empresa?.nombre || 'Xheros Barber';
-            const mensajeBienvenida = config?.empresa?.mensaje_bienvenida || 
+            const mensajeBienvenida = config?.empresa?.mensaje_bienvenida ||
                 '¡Hola! Bienvenido a {nombre_negocio}. 👋 Soy tu asesor virtual. ¿Podrías decirme tu nombre para atenderte de manera más personal?';
-            
+
             const saludo = mensajeBienvenida.replace('{nombre_negocio}', nombreEmpresa);
-            await client.sendMessage(msg.from, saludo);
+            await enviarMensajeTexto(userId, saludo);
             addMessageToHistory(userId, 'assistant', saludo);
             return;
         }
@@ -734,7 +650,7 @@ client.on('message', async (msg) => {
                 model: 'llama-3.3-70b-versatile',
                 messages: [
                     { role: 'system', content: 'Extrae SOLO el nombre propio de este mensaje. Si no hay un nombre, responde "null".' },
-                    { role: 'user', content: msg.body }
+                    { role: 'user', content: textoMensaje }
                 ]
             });
 
@@ -745,22 +661,20 @@ client.on('message', async (msg) => {
                     await guardarCliente(TELEFONO_BOT, userId, extractedName);
                 }
                 const bienvenida = `¡Excelente, ${extractedName}! Gracias por compartir tu nombre. ¿En qué puedo ayudarte hoy?`;
-                await client.sendMessage(msg.from, bienvenida);
+                await enviarMensajeTexto(userId, bienvenida);
                 addMessageToHistory(userId, 'assistant', bienvenida);
                 return;
             }
         }
 
         const conversationHistory = getConversationHistory(userId);
-        addMessageToHistory(userId, 'user', msg.body);
+        addMessageToHistory(userId, 'user', textoMensaje);
 
         const currentUserName = getUserName(userId) || 'amigo';
 
-        // OJO: nunca uses new Date().toISOString() para "hoy" — eso da la fecha en UTC,
-        // y en Colombia (UTC-5) de noche ya sería "mañana" en UTC, corriendo todas las citas un día.
         const ahoraBogota = new Date().toLocaleString('en-US', { timeZone: 'America/Bogota' });
         const fechaBogota = new Date(ahoraBogota);
-        const hoy = fechaBogota.toLocaleDateString('sv-SE'); // formato AAAA-MM-DD
+        const hoy = fechaBogota.toLocaleDateString('sv-SE');
         const diaSemana = fechaBogota.toLocaleDateString('es-CO', { weekday: 'long' });
 
         const ultimaCita = getUltimaCita(userId);
@@ -768,13 +682,10 @@ client.on('message', async (msg) => {
             ? `CITA ACTIVA DEL CLIENTE: ${ultimaCita.servicio} el ${ultimaCita.fecha} a las ${ultimaCita.hora}. Si quiere modificar o cancelar sin especificar cuál, usa estos datos.`
             : 'El cliente no tiene cita activa registrada en esta conversación.';
 
-        // Cargar configuración de empresa y servicios
         const config = await cargarConfiguracionEmpresa(TELEFONO_BOT);
         const nombreEmpresa = config?.empresa?.nombre || 'Xheros Barber';
-        const serviciosTexto = config ? obtenerServiciosParaPrompt(config.servicios) : 
+        const serviciosTexto = config ? obtenerServiciosParaPrompt(config.servicios) :
             '- Servicio básico: $0 COP (60 min)';
-        const mensajeBienvenida = config?.empresa?.mensaje_bienvenida || 
-            '¡Hola! Bienvenido a {nombre_negocio}. 👋 Soy tu asesor virtual. ¿Podrías decirme tu nombre para atenderte de manera más personal?';
 
         const systemInstruction = `
         Eres "XheroBot", el asesor virtual de "${nombreEmpresa}". Tu objetivo es atender de manera premium y fluida.
@@ -823,10 +734,10 @@ client.on('message', async (msg) => {
                 TELEFONO_BOT,
                 userId,
                 currentUserName,
-                msg.body
+                textoMensaje
             );
 
-            await client.sendMessage(msg.from, assistantResponse);
+            await enviarMensajeTexto(userId, assistantResponse);
             addMessageToHistory(userId, 'assistant', assistantResponse);
         } else {
             const rawContent = response.choices[0].message.content;
@@ -843,9 +754,9 @@ client.on('message', async (msg) => {
                     TELEFONO_BOT,
                     userId,
                     currentUserName,
-                    msg.body
+                    textoMensaje
                 );
-                await client.sendMessage(msg.from, assistantResponse);
+                await enviarMensajeTexto(userId, assistantResponse);
                 addMessageToHistory(userId, 'assistant', assistantResponse);
             } else {
                 console.log('💭 El modelo respondió sin llamar ninguna función (respuesta directa).');
@@ -854,13 +765,46 @@ client.on('message', async (msg) => {
                     assistantResponse = await obtenerRespuestaDirecta(messages, currentUserName);
                 }
                 if (!assistantResponse) assistantResponse = 'Lo siento, no pude procesar tu respuesta. ¿Puedes intentar de nuevo?';
-                await client.sendMessage(msg.from, assistantResponse);
+                await enviarMensajeTexto(userId, assistantResponse);
                 addMessageToHistory(userId, 'assistant', assistantResponse);
             }
         }
     } catch (error) {
         console.error('❌ Error procesando el mensaje:', error);
     }
-});
+}
 
-client.initialize();
+// ============================================================
+// Inicialización: ya no hay QR ni cliente que "arrancar".
+// Solo verificamos que la configuración de empresa y el
+// calendario estén listos, y marcamos el estado para /api/estado.
+// ============================================================
+async function iniciar() {
+    if (!TELEFONO_BOT) {
+        console.warn('⚠️  Falta la variable de entorno TELEFONO_BOT. Configúrala con el número registrado en Meta (sin "+").');
+        return;
+    }
+
+    console.log(`📱 Bot de WhatsApp (Cloud API) activo para el número: ${TELEFONO_BOT}`);
+    botState.setWhatsappListo(TELEFONO_BOT);
+
+    const config = await cargarConfiguracionEmpresa(TELEFONO_BOT);
+    if (config) {
+        console.log(`✅ Empresa configurada: ${config.empresa.nombre}`);
+    } else {
+        console.warn(`⚠️  No se encontró configuración de empresa para ${TELEFONO_BOT}`);
+        console.warn(`   Ve a /admin.html para configurar tu negocio.`);
+    }
+
+    const conectado = await trabajadorEstaConectado(TELEFONO_BOT);
+    if (!conectado) {
+        botState.setCalendarConectado(false);
+        console.warn(`⚠️  ATENCIÓN: este número (${TELEFONO_BOT}) todavía NO ha conectado su Google Calendar.`);
+        console.warn(`   Ve a /vincular.html para conectarlo.`);
+    } else {
+        botState.setCalendarConectado(true, conectado.correo);
+        console.log(`✅ Calendario ya conectado: ${conectado.correo}`);
+    }
+}
+
+module.exports = { iniciar, procesarMensajeWhatsapp, limpiarCacheConfiguracion };
