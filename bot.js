@@ -531,7 +531,7 @@ async function procesarLlamadaFuncion(functionName, functionArgs, telefono_bot, 
 
 async function obtenerRespuestaDirecta(messages, userName) {
     const response = await groq.chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
+        model: 'openai/gpt-oss-120b',
         messages: [
             ...messages,
             {
@@ -647,7 +647,7 @@ async function procesarMensajeWhatsapp(telefonoCliente, textoMensaje, messageId)
 
         if (!userName) {
             const nameResponse = await groq.chat.completions.create({
-                model: 'llama-3.3-70b-versatile',
+                model: 'openai/gpt-oss-120b',
                 messages: [
                     { role: 'system', content: 'Extrae SOLO el nombre propio de este mensaje. Si no hay un nombre, responde "null".' },
                     { role: 'user', content: textoMensaje }
@@ -715,7 +715,7 @@ async function procesarMensajeWhatsapp(telefonoCliente, textoMensaje, messageId)
         ];
 
         const response = await groq.chat.completions.create({
-            model: 'llama-3.3-70b-versatile',
+            model: 'openai/gpt-oss-120b',
             messages,
             tools: [agendarCitaTool, cancelarCitaTool, modificarCitaTool, consultarDisponibilidadTool],
             tool_choice: 'auto'
