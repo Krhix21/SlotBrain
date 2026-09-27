@@ -640,6 +640,7 @@ const client = new Client({
     authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
     puppeteer: {
         headless: true,
+        executablePath: process.env.CHROME_PATH || undefined, // Usar Chrome del sistema si está disponible
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -647,7 +648,8 @@ const client = new Client({
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
             '--no-zygote',
-            '--disable-gpu'
+            '--disable-gpu',
+            '--disable-software-rasterizer'
         ]
     }
 });

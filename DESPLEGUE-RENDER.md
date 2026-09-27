@@ -100,7 +100,7 @@ git push -u origin main
 
 **Build Command:**
 ```bash
-npm install
+npm install && npm run build
 ```
 
 **Start Command:**
@@ -125,16 +125,39 @@ En la sección **Environment**, agrega las siguientes variables:
 | `GROQ_API_KEY` | Tu API key de Groq | Obtenla de [console.groq.com](https://console.groq.com) |
 | `PORT` | `3000` | Puerto del servidor |
 
-### 4.4 Configurar Persistencia
+### 4.4 Configurar Persistencia (Solo Plan de Pago)
 
-Para que la sesión de WhatsApp no se pierda al reiniciar:
+⚠️ **Importante:** Los discos persistentes en Render están disponibles **solo en planes de pago** (Starter o superior). En el plan gratuito, la sesión de WhatsApp se perderá cada vez que el servicio se reinicie.
 
-1. En la configuración del Web Service
-2. Ve a **Advanced → Disk**
-3. Agrega un **Persistent Disk**:
-   - Nombre: `whatsapp-session`
-   - Tamaño: 1 GB (mínimo gratuito)
-   - Mount path: `/opt/render/project/.wwebjs_auth`
+**Opciones para el plan gratuito:**
+
+**Opción A: Aceptar que la sesión se pierda (más simple)**
+- No configures ningún disco
+- Cada vez que Render reinicie el servicio, tendrás que:
+  1. Ir a `https://tu-app.onrender.com/vincular.html`
+  2. Escanear el QR nuevamente
+  3. Reconectar Google Calendar
+- Esto es aceptable para pruebas, pero no para producción
+
+**Opción B: Usar un Cron Job para mantener el servicio despierto**
+- Crea un **Cron Job** en Render (gratis)
+- Comando: `curl https://tu-app.onrender.com/`
+- Frecuencia: Cada 10 minutos
+- Esto reduce los reinicios, pero no guarda la sesión permanentemente
+
+**Opción C: Plan de pago (recomendado para producción)**
+- Actualiza al plan **Starter ($7/mes)**
+- Habilita discos persistentes
+- Configura:
+  1. Ve a **"New +" → "Disk"**
+  2. Nombre: `whatsapp-session`
+  3. Tamaño: 1 GB
+  4. Región: La misma que tu Web Service
+  5. Crea el Disk
+  6. Ve a tu Web Service → **Advanced → Disks**
+  7. Selecciona el disco `whatsapp-session`
+  8. Mount path: `/opt/render/project/.wwebjs_auth`
+- La sesión de WhatsApp se mantendrá entre reinicios
 
 ## Paso 5: Desplegar
 
@@ -186,10 +209,14 @@ Para que la sesión de WhatsApp no se pierda al reiniciar:
 - **Sin SSL personalizado** (pero sí SSL gratuito de Render)
 - **La app se duerme** después de 15 minutos de inactividad
 - **Tarda ~30 segundos** en despertar cuando llega un mensaje
+- **Sin discos persistentes** - La sesión de WhatsApp se pierde al reiniciar
 
 **Nota:** Para un bot de WhatsApp que necesita estar siempre activo, considera:
-- Usar **Render Cron Jobs** para mantener la despierta
-- O actualizar al plan Starter ($7/mes) para evitar sleep
+- Usar **Render Cron Jobs** para mantener la despierta (gratis)
+- Actualizar al plan **Starter ($7/mes)** para:
+  - Evitar que la app se duerma
+  - Habilitar discos persistentes (sesión de WhatsApp se mantiene)
+  - Mejor rendimiento y estabilidad
 
 ## Solución de Problemas
 
@@ -204,7 +231,26 @@ Para que la sesión de WhatsApp no se pierda al reiniciar:
 
 ### Error de sesión de WhatsApp
 
-**Solución:** El disco persistente debe estar configurado correctamente. Verifica el paso 4.4.
+**Solución:** En el plan gratuito, esto es normal. Cada vez que Render reinicie el servicio:
+1. Ve a `https://tu-app.onrender.com/vincular.html`
+2. Escanea el QR nuevamente
+3. Reconecta Google Calendar
+
+**Para evitar esto:** Actualiza al plan Starter ($7/mes) para habilitar discos persistentes (ver paso 4.4, Opción C).
+
+### Error: "Could not find Chrome" (Puppeteer)
+
+**Problema:** whatsapp-web.js usa Puppeteer que necesita Chrome, pero Render no lo tiene instalado por defecto.
+
+**Solución:** Ya está configurado en el proyecto:
+1. El `package.json` incluye el comando `build` que instala Chrome
+2. El `Build Command` en Render debe ser: `npm install && npm run build`
+3. El `bot.js` está configurado para usar Chrome instalado
+
+**Si aún falla:**
+- Verifica que el Build Command incluya `npm run build`
+- Revisa los logs de Render para ver si Chrome se instaló correctamente
+- Asegúrate de tener suficiente espacio en el build (Chrome ocupa ~300MB)
 
 ### Error de Google Calendar
 
