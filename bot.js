@@ -6,7 +6,8 @@ const qrcode = require('qrcode'); // genera el QR como imagen para la web
 const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer'); // fallback para resolver Chrome si no hay PUPPETEER_EXECUTABLE_PATH
+
 const { verificarYAgendarCita, cancelarCita, modificarCita, trabajadorEstaConectado } = require('./calendar');
 const { guardarCliente, registrarCitaAgendada, registrarCitaCancelada, registrarCitaModificada } = require('./clientes');
 const botState = require('./botState');
@@ -636,6 +637,10 @@ const consultarDisponibilidadTool = {
 };
 
 // ---------- Cliente de WhatsApp ----------
+// executablePath: en Docker, PUPPETEER_EXECUTABLE_PATH ya viene definido por el
+// Dockerfile apuntando al Chromium del sistema (/usr/bin/chromium). Si esa
+// variable no está presente (por ejemplo corriendo local sin Docker), caemos
+// a puppeteer.executablePath() como respaldo.
 const client = new Client({
     authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
     puppeteer: {
@@ -648,9 +653,7 @@ const client = new Client({
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
             '--no-zygote',
-            '--disable-gpu',
-            '--disable-software-rasterizer',
-            '--single-process'
+            '--disable-gpu'
         ]
     }
 });
