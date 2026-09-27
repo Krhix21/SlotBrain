@@ -1,26 +1,88 @@
 const { createClient } = require('@supabase/supabase-js');
+const crypto = require('crypto');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
-// Middleware para verificar autenticación básica (opcional - mejorar en producción)
+// ============================================
+// SESSION MANAGEMENT
+// ============================================
+const sessions = new Map(); // token -> expiresAt
+const SESSION_TTL = 8 * 60 * 60 * 1000; // 8 horas
+
+function generateToken() {
+    return crypto.randomBytes(32).toString('hex');
+}
+
 function requireAuth(req, res, next) {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const auth = req.headers.authorization;
+    if (!auth || !auth.startsWith('Bearer ')) {
         return res.status(401).json({ error: 'No autorizado' });
     }
-    // TODO: Implementar autenticación JWT o similar
+    const token = auth.slice(7);
+    const exp = sessions.get(token);
+    if (!exp || Date.now() > exp) {
+        sessions.delete(token);
+        return res.status(401).json({ error: 'Sesión expirada' });
+    }
     next();
+}
+
+// ============================================
+// AUTH ENDPOINTS
+// ============================================
+
+async function login(req, res) {
+    const { usuario, password } = req.body;
+    const ADMIN_USER = process.env.ADMIN_USER || 'admin';
+    const ADMIN_PASS = process.env.ADMIN_PASSWORD || 'admin123';
+
+    // Pequeño delay para dificultar fuerza bruta
+    await new Promise(r => setTimeout(r, 500));
+
+    if (usuario !== ADMIN_USER || password !== ADMIN_PASS) {
+        return res.status(401).json({ error: 'Credenciales incorrectas' });
+    }
+
+    const token = generateToken();
+    sessions.set(token, Date.now() + SESSION_TTL);
+    res.json({ token, usuario });
+}
+
+function logout(req, res) {
+    const token = req.headers.authorization?.slice(7);
+    if (token) sessions.delete(token);
+    res.json({ ok: true });
+}
+
+function validateSession(req, res) {
+    res.json({ valid: true });
 }
 
 // ============================================
 // ENDPOINTS PARA EMPRESAS
 // ============================================
 
+// Listar todas las empresas
+async function getEmpresas(req, res) {
+    try {
+        const { data, error } = await supabase
+            .from('empresas')
+            .select('*')
+            .order('nombre');
+
+        if (error) throw error;
+        res.json(data);
+    } catch (error) {
+        console.error('Error obteniendo empresas:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+}
+
 // Obtener empresa por teléfono del bot
 async function getEmpresaByTelefonoBot(req, res) {
     try {
         const { telefono_bot } = req.params;
-        
+
         const { data: trabajador, error: trabajadorError } = await supabase
             .from('trabajadores')
             .select('empresa_id, nombre')
@@ -127,9 +189,9 @@ async function assignEmpresaToTrabajador(req, res) {
 
         const { data, error } = await supabase
             .from('trabajadores')
-            .update({ 
-                empresa_id, 
-                nombre: nombre_trabajador 
+            .update({
+                empresa_id,
+                nombre: nombre_trabajador
             })
             .eq('telefono_bot', telefono_bot)
             .select()
@@ -141,12 +203,121 @@ async function assignEmpresaToTrabajador(req, res) {
         }
 
         if (!data) {
-            return res.status(404).json({ error: 'Barbero no encontrado' });
+            return res.status(404).json({ error: 'Trabajador no encontrado' });
         }
 
         res.json(data);
     } catch (error) {
         console.error('Error asignando empresa:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+}
+
+// ============================================
+// ENDPOINTS PARA TRABAJADORES
+// ============================================
+
+// Listar todos los trabajadores (con info de empresa)
+async function getTrabajadores(req, res) {
+    try {
+        const { data, error } = await supabase
+            .from('trabajadores')
+            .select(`
+                *,
+                empresas (id, nombre)
+            `)
+            .order('creado_en', { ascending: false });
+
+        if (error) throw error;
+        res.json(data);
+    } catch (error) {
+        console.error('Error obteniendo trabajadores:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+}
+
+// Crear/registrar trabajador (upsert por telefono_bot)
+async function createTrabajador(req, res) {
+    try {
+        const { telefono_bot, nombre, empresa_id } = req.body;
+
+        if (!telefono_bot) {
+            return res.status(400).json({ error: 'telefono_bot es requerido' });
+        }
+
+        const payload = { telefono_bot, activo: true };
+        if (nombre) payload.nombre = nombre;
+        if (empresa_id) payload.empresa_id = empresa_id;
+
+        const { data, error } = await supabase
+            .from('trabajadores')
+            .upsert(payload, { onConflict: 'telefono_bot' })
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Error creando trabajador:', error);
+            return res.status(500).json({ error: 'Error al crear el trabajador' });
+        }
+
+        res.status(201).json(data);
+    } catch (error) {
+        console.error('Error creando trabajador:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+}
+
+// Actualizar nombre y/o empresa del trabajador
+async function updateTrabajador(req, res) {
+    try {
+        const { id } = req.params;
+        // Solo permitir actualizar campos seguros desde el admin
+        const { nombre, empresa_id } = req.body;
+        const updates = {};
+        if (nombre !== undefined) updates.nombre = nombre;
+        if (empresa_id !== undefined) updates.empresa_id = empresa_id || null;
+
+        const { data, error } = await supabase
+            .from('trabajadores')
+            .update(updates)
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Error actualizando trabajador:', error);
+            return res.status(500).json({ error: 'Error al actualizar el trabajador' });
+        }
+
+        if (!data) {
+            return res.status(404).json({ error: 'Trabajador no encontrado' });
+        }
+
+        res.json(data);
+    } catch (error) {
+        console.error('Error actualizando trabajador:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+}
+
+// Desconectar Google Calendar de un trabajador
+async function desconectarCalendar(req, res) {
+    try {
+        const { id } = req.params;
+
+        const { data, error } = await supabase
+            .from('trabajadores')
+            .update({ refresh_token: null, correo: null })
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) throw error;
+        if (!data) return res.status(404).json({ error: 'Trabajador no encontrado' });
+
+        res.json({ ok: true });
+    } catch (error) {
+        console.error('Error desconectando calendar:', error);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 }
@@ -273,7 +444,6 @@ async function deleteServicio(req, res) {
 // ENDPOINTS PARA CITAS
 // ============================================
 
-// Obtener citas de una empresa
 async function getCitasByEmpresa(req, res) {
     try {
         const { empresa_id } = req.params;
@@ -284,17 +454,9 @@ async function getCitasByEmpresa(req, res) {
             .select('*')
             .eq('empresa_id', empresa_id);
 
-        if (estado) {
-            query = query.eq('estado', estado);
-        }
-
-        if (fecha_desde) {
-            query = query.gte('fecha', fecha_desde);
-        }
-
-        if (fecha_hasta) {
-            query = query.lte('fecha', fecha_hasta);
-        }
+        if (estado) query = query.eq('estado', estado);
+        if (fecha_desde) query = query.gte('fecha', fecha_desde);
+        if (fecha_hasta) query = query.lte('fecha', fecha_hasta);
 
         const { data, error } = await query.order('creado_en', { ascending: false });
 
@@ -310,7 +472,6 @@ async function getCitasByEmpresa(req, res) {
     }
 }
 
-// Crear registro de cita
 async function createCita(req, res) {
     try {
         const cita = req.body;
@@ -333,7 +494,6 @@ async function createCita(req, res) {
     }
 }
 
-// Actualizar estado de cita
 async function updateCitaEstado(req, res) {
     try {
         const { id } = req.params;
@@ -367,22 +527,35 @@ async function updateCitaEstado(req, res) {
 // ============================================
 
 function setupAdminRoutes(app) {
-    // Rutas de empresas
-    app.get('/api/admin/empresas/telefono/:telefono_bot', getEmpresaByTelefonoBot);
-    app.post('/api/admin/empresas', createEmpresa);
-    app.put('/api/admin/empresas/:id', updateEmpresa);
-    app.post('/api/admin/empresas/assign', assignEmpresaToTrabajador);
+    // ── Auth (sin protección) ──
+    app.post('/api/admin/login', login);
+    app.post('/api/admin/logout', requireAuth, logout);
+    app.get('/api/admin/validate', requireAuth, validateSession);
 
-    // Rutas de servicios
-    app.get('/api/admin/servicios/empresa/:empresa_id', getServiciosByEmpresa);
-    app.post('/api/admin/servicios', createServicio);
-    app.put('/api/admin/servicios/:id', updateServicio);
-    app.delete('/api/admin/servicios/:id', deleteServicio);
+    // ── Empresas ──
+    app.get('/api/admin/empresas', requireAuth, getEmpresas);
+    // IMPORTANTE: la ruta específica va ANTES que /:id para evitar conflictos
+    app.get('/api/admin/empresas/telefono/:telefono_bot', requireAuth, getEmpresaByTelefonoBot);
+    app.post('/api/admin/empresas', requireAuth, createEmpresa);
+    app.put('/api/admin/empresas/:id', requireAuth, updateEmpresa);
+    app.post('/api/admin/empresas/assign', requireAuth, assignEmpresaToTrabajador);
 
-    // Rutas de citas
-    app.get('/api/admin/citas/empresa/:empresa_id', getCitasByEmpresa);
-    app.post('/api/admin/citas', createCita);
-    app.put('/api/admin/citas/:id/estado', updateCitaEstado);
+    // ── Trabajadores ──
+    app.get('/api/admin/trabajadores', requireAuth, getTrabajadores);
+    app.post('/api/admin/trabajadores', requireAuth, createTrabajador);
+    app.put('/api/admin/trabajadores/:id', requireAuth, updateTrabajador);
+    app.delete('/api/admin/trabajadores/:id/calendar', requireAuth, desconectarCalendar);
+
+    // ── Servicios ──
+    app.get('/api/admin/servicios/empresa/:empresa_id', requireAuth, getServiciosByEmpresa);
+    app.post('/api/admin/servicios', requireAuth, createServicio);
+    app.put('/api/admin/servicios/:id', requireAuth, updateServicio);
+    app.delete('/api/admin/servicios/:id', requireAuth, deleteServicio);
+
+    // ── Citas ──
+    app.get('/api/admin/citas/empresa/:empresa_id', requireAuth, getCitasByEmpresa);
+    app.post('/api/admin/citas', requireAuth, createCita);
+    app.put('/api/admin/citas/:id/estado', requireAuth, updateCitaEstado);
 }
 
 module.exports = { setupAdminRoutes };

@@ -3,509 +3,1060 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Panel de Administración - Sistema de Citas</title>
+    <title>Panel Admin – Sistema de Citas</title>
+    <meta name="description" content="Panel de administración para configurar empresas, trabajadores y servicios del sistema de citas por WhatsApp.">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; }
+        body { font-family: 'Inter', system-ui, sans-serif; margin: 0; }
+
+        /* ── Scrollbar ── */
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #2a2a35; border-radius: 99px; }
+        ::-webkit-scrollbar-thumb:hover { background: #3a3a4a; }
+
+        /* ── Input focus ── */
+        .field:focus { outline: none; border-color: #f59e0b !important; box-shadow: 0 0 0 3px rgba(245,158,11,0.15); }
+
+        /* ── Sidebar item ── */
+        .nav-item { transition: all 0.15s ease; }
+        .nav-item.active { background: rgba(245,158,11,0.12); border-left: 3px solid #f59e0b; color: #fbbf24; }
+        .nav-item:not(.active):hover { background: rgba(255,255,255,0.04); color: #e5e7eb; }
+
+        /* ── Btn primary ── */
+        .btn-gold {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            color: #0a0a0b;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+        .btn-gold:hover {
+            background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(245,158,11,0.35);
+        }
+        .btn-gold:active { transform: translateY(0); box-shadow: none; }
+        .btn-gold:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
+        /* ── Cards ── */
+        .card { background: #111113; border: 1px solid #1e1e26; border-radius: 16px; }
+        .card-inner { background: #16161c; border: 1px solid #22222c; border-radius: 12px; }
+
+        /* ── Badges ── */
+        .badge-green { background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.25); color: #86efac; }
+        .badge-red   { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25); color: #fca5a5; }
+        .badge-gray  { background: rgba(107,114,128,0.1); border: 1px solid #2a2a35; color: #6b7280; }
+        .badge-amber { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.25); color: #fbbf24; }
+
+        /* ── Animations ── */
+        .fade-in { animation: fadeSlide 0.25s ease forwards; }
+        @keyframes fadeSlide {
+            from { opacity: 0; transform: translateY(6px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ── Modal ── */
+        .modal-bg { background: rgba(0,0,0,0.75); backdrop-filter: blur(6px); }
+        .modal-box { background: #111113; border: 1px solid #2a2a35; border-radius: 20px; }
+
+        /* ── Login gradient bg ── */
+        .login-bg { background: radial-gradient(ellipse 80% 60% at 50% 10%, #1c0f00 0%, #0a0a0b 65%); }
+
+        /* ── Glow pill input ── */
+        .input-glow { background: rgba(255,255,255,0.04); border: 1px solid #2a2a35; color: #f0f0f0; }
+        .input-glow::placeholder { color: #4b5563; }
+
+        /* ── Toast ── */
+        .toast-success { background: rgba(34,197,94,0.12); border: 1px solid rgba(34,197,94,0.3); color: #86efac; }
+        .toast-error   { background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.3); color: #fca5a5; }
+
+        /* ── Worker calendar link strip ── */
+        .link-strip { background: rgba(245,158,11,0.05); border: 1px solid rgba(245,158,11,0.18); border-radius: 10px; }
+
+        /* ── Pulse dot ── */
+        .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .dot-green { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.7); }
+        .dot-red   { background: #ef4444; }
+        .dot-gray  { background: #4b5563; }
+    </style>
 </head>
-<body class="bg-gray-900 text-gray-100 min-h-screen">
-    <div class="container mx-auto px-4 py-8">
-        <!-- Header -->
-        <div class="mb-8">
-            <h1 class="text-3xl font-bold text-amber-500 mb-2">
-                <i class="fas fa-cogs mr-2"></i>Panel de Administración
-            </h1>
-            <p class="text-gray-400">Configura tu negocio y servicios</p>
-        </div>
+<body style="background:#0a0a0b; color:#f0f0f0; min-height:100vh;">
 
-        <!-- Paso 1: Ingresar teléfono del bot -->
-        <div id="pasoTelefono" class="mb-8">
-            <div class="bg-gray-800 rounded-lg p-6">
-                <h2 class="text-xl font-semibold mb-4 text-amber-400">
-                    <i class="fas fa-mobile-alt mr-2"></i>Paso 1: Ingresa tu número de WhatsApp del bot
-                </h2>
-                <div class="flex gap-4">
-                    <input 
-                        type="text" 
-                        id="telefonoBot" 
-                        placeholder="Ej: 573001234567"
-                        class="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-amber-500"
-                    >
-                    <button 
-                        onclick="cargarEmpresa()"
-                        class="bg-amber-500 hover:bg-amber-600 text-gray-900 font-semibold px-6 py-3 rounded-lg transition-colors"
-                    >
-                        <i class="fas fa-search mr-2"></i>Buscar
-                    </button>
-                </div>
+<!-- ═══════════════════════════════════════════
+     LOGIN SCREEN
+════════════════════════════════════════════ -->
+<div id="loginScreen" class="login-bg" style="display:flex; min-height:100vh; align-items:center; justify-content:center; padding:1rem;">
+    <div style="width:100%; max-width:420px;">
+
+        <!-- Logo -->
+        <div style="text-align:center; margin-bottom:2rem;">
+            <div style="display:inline-flex; align-items:center; justify-content:center; width:60px; height:60px; border-radius:16px; background:linear-gradient(135deg,#f59e0b,#d97706); margin-bottom:1rem;">
+                <i class="fas fa-scissors" style="font-size:1.4rem; color:#0a0a0b;"></i>
             </div>
+            <h1 style="font-size:1.5rem; font-weight:800; color:#fff; margin:0 0 0.25rem;">Panel de Administración</h1>
+            <p style="color:#6b7280; font-size:0.875rem; margin:0;">Sistema de Citas por WhatsApp</p>
         </div>
 
-        <!-- Paso 2: Configurar empresa -->
-        <div id="pasoEmpresa" class="mb-8 hidden">
-            <div class="bg-gray-800 rounded-lg p-6">
-                <h2 class="text-xl font-semibold mb-4 text-amber-400">
-                    <i class="fas fa-building mr-2"></i>Paso 2: Configura tu empresa
-                </h2>
-                
-                <div id="empresaExistente" class="hidden mb-4 p-4 bg-green-900/30 border border-green-700 rounded-lg">
-                    <p class="text-green-400">
-                        <i class="fas fa-check-circle mr-2"></i>
-                        Empresa encontrada: <span id="nombreEmpresa" class="font-semibold"></span>
-                    </p>
+        <!-- Card login -->
+        <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:20px; padding:2rem; backdrop-filter:blur(10px);">
+            <form id="loginForm">
+                <!-- Usuario -->
+                <div style="margin-bottom:1.25rem;">
+                    <label style="display:block; font-size:0.8rem; font-weight:500; color:#9ca3af; margin-bottom:0.5rem;">USUARIO</label>
+                    <div style="position:relative;">
+                        <i class="fas fa-user" style="position:absolute; left:14px; top:50%; transform:translateY(-50%); color:#4b5563; font-size:0.8rem;"></i>
+                        <input id="loginUser" type="text" placeholder="Ingresa tu usuario" autocomplete="username"
+                            class="field input-glow"
+                            style="width:100%; padding:0.8rem 1rem 0.8rem 2.5rem; border-radius:10px; font-size:0.875rem; transition:all 0.2s;">
+                    </div>
                 </div>
 
-                <div id="empresaNoEncontrada" class="hidden mb-4 p-4 bg-yellow-900/30 border border-yellow-700 rounded-lg">
-                    <p class="text-yellow-400">
-                        <i class="fas fa-exclamation-triangle mr-2"></i>
-                        No se encontró una empresa para este número. Crea una nueva:
-                    </p>
+                <!-- Password -->
+                <div style="margin-bottom:1.5rem;">
+                    <label style="display:block; font-size:0.8rem; font-weight:500; color:#9ca3af; margin-bottom:0.5rem;">CONTRASEÑA</label>
+                    <div style="position:relative;">
+                        <i class="fas fa-lock" style="position:absolute; left:14px; top:50%; transform:translateY(-50%); color:#4b5563; font-size:0.8rem;"></i>
+                        <input id="loginPass" type="password" placeholder="••••••••" autocomplete="current-password"
+                            class="field input-glow"
+                            style="width:100%; padding:0.8rem 1rem 0.8rem 2.5rem; border-radius:10px; font-size:0.875rem; transition:all 0.2s;">
+                    </div>
                 </div>
 
-                <form id="formEmpresa" class="space-y-4">
-                    <input type="hidden" id="empresaId">
-                    
-                    <div>
-                        <label class="block text-sm font-medium mb-2">Nombre de la empresa *</label>
-                        <input 
-                            type="text" 
-                            id="nombreEmpresaInput"
-                            class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-amber-500"
-                            placeholder="Ej: Xheros Barber"
-                        >
-                    </div>
+                <!-- Error -->
+                <div id="loginError" style="display:none; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.25); border-radius:8px; padding:0.65rem 1rem; margin-bottom:1rem; font-size:0.8rem; color:#fca5a5; text-align:center;">
+                    <i class="fas fa-exclamation-circle" style="margin-right:6px;"></i>
+                    <span id="loginErrorMsg">Credenciales incorrectas</span>
+                </div>
 
-                    <div>
-                        <label class="block text-sm font-medium mb-2">Descripción</label>
-                        <textarea 
-                            id="descripcionEmpresa"
-                            rows="3"
-                            class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-amber-500"
-                            placeholder="Descripción breve de tu negocio"
-                        ></textarea>
-                    </div>
-
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label class="block text-sm font-medium mb-2">Teléfono</label>
-                            <input 
-                                type="text" 
-                                id="telefonoEmpresa"
-                                class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-amber-500"
-                                placeholder="Ej: 573001234567"
-                            >
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium mb-2">Zona horaria</label>
-                            <select 
-                                id="zonaHoraria"
-                                class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-amber-500"
-                            >
-                                <option value="America/Bogota">America/Bogota (Colombia)</option>
-                                <option value="America/Mexico_City">America/Mexico_City (México)</option>
-                                <option value="America/Argentina/Buenos_Aires">America/Argentina/Buenos_Aires (Argentina)</option>
-                                <option value="America/Lima">America/Lima (Perú)</option>
-                                <option value="America/Santiago">America/Santiago (Chile)</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium mb-2">Dirección</label>
-                        <input 
-                            type="text" 
-                            id="direccionEmpresa"
-                            class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-amber-500"
-                            placeholder="Ej: Calle 123 #45-67"
-                        >
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium mb-2">Mensaje de bienvenida</label>
-                        <textarea 
-                            id="mensajeBienvenida"
-                            rows="2"
-                            class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-amber-500"
-                            placeholder="Mensaje que el bot envía al saludar"
-                        ></textarea>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium mb-2">Mensaje de confirmación de cita</label>
-                        <textarea 
-                            id="mensajeConfirmacion"
-                            rows="2"
-                            class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-amber-500"
-                            placeholder="Variables disponibles: {nombre}, {servicio}, {fecha}, {hora}, {nombre_negocio}"
-                        ></textarea>
-                    </div>
-
-                    <button 
-                        type="submit"
-                        class="w-full bg-amber-500 hover:bg-amber-600 text-gray-900 font-semibold px-6 py-3 rounded-lg transition-colors"
-                    >
-                        <i class="fas fa-save mr-2"></i>Guardar Empresa
-                    </button>
-                </form>
-            </div>
+                <!-- Submit -->
+                <button id="loginBtn" type="submit" class="btn-gold" style="width:100%; padding:0.85rem; border-radius:10px; border:none; cursor:pointer; font-size:0.875rem; display:flex; align-items:center; justify-content:center; gap:8px;">
+                    <i class="fas fa-sign-in-alt"></i>
+                    Iniciar sesión
+                </button>
+            </form>
         </div>
 
-        <!-- Paso 3: Servicios -->
-        <div id="pasoServicios" class="mb-8 hidden">
-            <div class="bg-gray-800 rounded-lg p-6">
-                <div class="flex justify-between items-center mb-4">
-                    <h2 class="text-xl font-semibold text-amber-400">
-                        <i class="fas fa-concierge-bell mr-2"></i>Paso 3: Servicios
-                    </h2>
-                    <button 
-                        onclick="mostrarFormServicio()"
-                        class="bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors"
-                    >
-                        <i class="fas fa-plus mr-2"></i>Agregar Servicio
-                    </button>
-                </div>
-
-                <!-- Formulario de servicio (oculto por defecto) -->
-                <div id="formServicio" class="hidden mb-6 p-4 bg-gray-700 rounded-lg">
-                    <h3 class="text-lg font-semibold mb-4">Nuevo Servicio</h3>
-                    <form id="formServicioData" class="space-y-4">
-                        <input type="hidden" id="servicioId">
-                        
-                        <div>
-                            <label class="block text-sm font-medium mb-2">Nombre del servicio *</label>
-                            <input 
-                                type="text" 
-                                id="nombreServicio"
-                                class="w-full bg-gray-600 border border-gray-500 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-amber-500"
-                                placeholder="Ej: Corte de cabello"
-                            >
-                        </div>
-
-                        <div>
-                            <label class="block text-sm font-medium mb-2">Descripción</label>
-                            <textarea 
-                                id="descripcionServicio"
-                                rows="2"
-                                class="w-full bg-gray-600 border border-gray-500 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-amber-500"
-                                placeholder="Descripción del servicio"
-                            ></textarea>
-                        </div>
-
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-sm font-medium mb-2">Precio (COP) *</label>
-                                <input 
-                                    type="number" 
-                                    id="precioServicio"
-                                    class="w-full bg-gray-600 border border-gray-500 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-amber-500"
-                                    placeholder="Ej: 45000"
-                                >
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium mb-2">Duración (minutos)</label>
-                                <input 
-                                    type="number" 
-                                    id="duracionServicio"
-                                    value="60"
-                                    class="w-full bg-gray-600 border border-gray-500 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-amber-500"
-                                >
-                            </div>
-                        </div>
-
-                        <div class="flex gap-4">
-                            <button 
-                                type="submit"
-                                class="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-3 rounded-lg transition-colors"
-                            >
-                                <i class="fas fa-save mr-2"></i>Guardar Servicio
-                            </button>
-                            <button 
-                                type="button"
-                                onclick="ocultarFormServicio()"
-                                class="flex-1 bg-gray-600 hover:bg-gray-700 text-white font-semibold px-6 py-3 rounded-lg transition-colors"
-                            >
-                                <i class="fas fa-times mr-2"></i>Cancelar
-                            </button>
-                        </div>
-                    </form>
-                </div>
-
-                <!-- Lista de servicios -->
-                <div id="listaServicios" class="space-y-3">
-                    <p class="text-gray-400 text-center py-8">Cargando servicios...</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- Mensaje de éxito -->
-        <div id="mensajeExito" class="hidden mb-8 p-4 bg-green-900/30 border border-green-700 rounded-lg">
-            <p class="text-green-400 text-center">
-                <i class="fas fa-check-circle mr-2"></i>
-                <span id="textoExito"></span>
-            </p>
-        </div>
+        <p style="text-align:center; color:#374151; font-size:0.75rem; margin-top:1.5rem;">
+            Acceso restringido · Solo personal autorizado
+        </p>
     </div>
+</div>
 
-    <script>
-        let empresaActual = null;
-        let telefonoBotActual = null;
+<!-- ═══════════════════════════════════════════
+     DASHBOARD
+════════════════════════════════════════════ -->
+<div id="dashboard" style="display:none; height:100vh; flex-direction:row;">
 
-        async function cargarEmpresa() {
-            const telefono = document.getElementById('telefonoBot').value.trim();
-            if (!telefono) {
-                alert('Por favor ingresa el número de teléfono');
-                return;
-            }
+    <!-- ─── SIDEBAR ─── -->
+    <aside id="sidebar" style="width:256px; min-height:100vh; background:#0d0d10; border-right:1px solid #1a1a22; display:flex; flex-direction:column; position:fixed; top:0; left:0; bottom:0; z-index:10;">
 
-            telefonoBotActual = telefono;
+        <!-- Logo -->
+        <div style="padding:1.5rem 1.25rem 1rem; border-bottom:1px solid #1a1a22;">
+            <div style="display:flex; align-items:center; gap:12px;">
+                <div style="width:38px; height:38px; border-radius:10px; background:linear-gradient(135deg,#f59e0b,#d97706); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                    <i class="fas fa-scissors" style="color:#0a0a0b; font-size:0.9rem;"></i>
+                </div>
+                <div>
+                    <div style="font-weight:700; font-size:0.875rem; color:#fff;">Panel Admin</div>
+                    <div style="font-size:0.7rem; color:#4b5563;">Sistema de Citas</div>
+                </div>
+            </div>
+        </div>
 
-            try {
-                const res = await fetch(`/api/admin/empresas/telefono/${telefono}`);
-                const data = await res.json();
+        <!-- Nav -->
+        <nav style="flex:1; padding:1rem 0.75rem; display:flex; flex-direction:column; gap:2px;">
+            <button id="nav-empresas" onclick="showSection('empresas')" class="nav-item active"
+                style="width:100%; text-align:left; display:flex; align-items:center; gap:10px; padding:0.7rem 1rem; border-radius:10px; border:none; cursor:pointer; font-size:0.8rem; font-weight:500; border-left:3px solid transparent;">
+                <i class="fas fa-building" style="width:16px; text-align:center;"></i>
+                Empresas
+            </button>
+            <button id="nav-trabajadores" onclick="showSection('trabajadores')" class="nav-item"
+                style="width:100%; text-align:left; display:flex; align-items:center; gap:10px; padding:0.7rem 1rem; border-radius:10px; border:none; cursor:pointer; font-size:0.8rem; font-weight:500; color:#6b7280; border-left:3px solid transparent;">
+                <i class="fas fa-users" style="width:16px; text-align:center;"></i>
+                Trabajadores
+            </button>
+            <button id="nav-servicios" onclick="showSection('servicios')" class="nav-item"
+                style="width:100%; text-align:left; display:flex; align-items:center; gap:10px; padding:0.7rem 1rem; border-radius:10px; border:none; cursor:pointer; font-size:0.8rem; font-weight:500; color:#6b7280; border-left:3px solid transparent;">
+                <i class="fas fa-concierge-bell" style="width:16px; text-align:center;"></i>
+                Servicios
+            </button>
+        </nav>
 
-                if (res.ok && data.id) {
-                    empresaActual = data;
-                    mostrarEmpresaExistente(data);
-                } else {
-                    empresaActual = null;
-                    mostrarEmpresaNoEncontrada();
-                }
+        <!-- User + Logout -->
+        <div style="padding:1rem 0.75rem; border-top:1px solid #1a1a22;">
+            <div style="display:flex; align-items:center; justify-content:space-between;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <div style="width:30px; height:30px; border-radius:8px; background:#1a1a22; display:flex; align-items:center; justify-content:center;">
+                        <i class="fas fa-user-shield" style="color:#6b7280; font-size:0.75rem;"></i>
+                    </div>
+                    <span id="sidebarUser" style="font-size:0.8rem; font-weight:500; color:#d1d5db;">Admin</span>
+                </div>
+                <button onclick="doLogout()" title="Cerrar sesión"
+                    style="background:none; border:none; cursor:pointer; color:#4b5563; font-size:0.85rem; padding:6px; border-radius:6px; transition:color 0.15s;"
+                    onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='#4b5563'">
+                    <i class="fas fa-sign-out-alt"></i>
+                </button>
+            </div>
+        </div>
+    </aside>
 
-                document.getElementById('pasoEmpresa').classList.remove('hidden');
-                document.getElementById('pasoServicios').classList.remove('hidden');
+    <!-- ─── MAIN CONTENT ─── -->
+    <main style="margin-left:256px; flex:1; min-height:100vh; overflow-y:auto; background:#0a0a0b;">
 
-                if (empresaActual) {
-                    cargarServicios(empresaActual.id);
-                }
-            } catch (error) {
-                console.error('Error cargando empresa:', error);
-                alert('Error al cargar la empresa');
-            }
-        }
+        <!-- ══ EMPRESAS ══ -->
+        <section id="secEmpresas" class="fade-in" style="padding:2.5rem;">
+            <div style="max-width:900px; margin:0 auto;">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:2rem;">
+                    <div>
+                        <h2 style="font-size:1.6rem; font-weight:800; color:#fff; margin:0 0 4px;">Empresas</h2>
+                        <p style="color:#4b5563; font-size:0.875rem; margin:0;">Configura los datos de tu negocio</p>
+                    </div>
+                    <button onclick="abrirModalEmpresa()" class="btn-gold" style="padding:0.6rem 1.25rem; border-radius:10px; border:none; cursor:pointer; font-size:0.8rem; display:flex; align-items:center; gap:6px;">
+                        <i class="fas fa-plus"></i> Nueva empresa
+                    </button>
+                </div>
+                <div id="listaEmpresas">
+                    <div style="text-align:center; padding:4rem 0; color:#374151;">
+                        <i class="fas fa-spinner fa-spin" style="font-size:1.5rem; margin-bottom:0.75rem; display:block;"></i>
+                        Cargando empresas...
+                    </div>
+                </div>
+            </div>
+        </section>
 
-        function mostrarEmpresaExistente(empresa) {
-            document.getElementById('empresaExistente').classList.remove('hidden');
-            document.getElementById('empresaNoEncontrada').classList.add('hidden');
-            document.getElementById('nombreEmpresa').textContent = empresa.nombre;
+        <!-- ══ TRABAJADORES ══ -->
+        <section id="secTrabajadores" class="fade-in" style="display:none; padding:2.5rem;">
+            <div style="max-width:900px; margin:0 auto;">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:2rem;">
+                    <div>
+                        <h2 style="font-size:1.6rem; font-weight:800; color:#fff; margin:0 0 4px;">Trabajadores</h2>
+                        <p style="color:#4b5563; font-size:0.875rem; margin:0;">Gestiona números de WhatsApp y calendarios</p>
+                    </div>
+                    <button onclick="abrirModalTrabajador()" class="btn-gold" style="padding:0.6rem 1.25rem; border-radius:10px; border:none; cursor:pointer; font-size:0.8rem; display:flex; align-items:center; gap:6px;">
+                        <i class="fas fa-user-plus"></i> Agregar trabajador
+                    </button>
+                </div>
+                <div id="listaTrabajadores">
+                    <div style="text-align:center; padding:4rem 0; color:#374151;">
+                        <i class="fas fa-spinner fa-spin" style="font-size:1.5rem; margin-bottom:0.75rem; display:block;"></i>
+                        Cargando trabajadores...
+                    </div>
+                </div>
+            </div>
+        </section>
 
-            // Llenar formulario
-            document.getElementById('empresaId').value = empresa.id;
-            document.getElementById('nombreEmpresaInput').value = empresa.nombre || '';
-            document.getElementById('descripcionEmpresa').value = empresa.descripcion || '';
-            document.getElementById('telefonoEmpresa').value = empresa.telefono || '';
-            document.getElementById('zonaHoraria').value = empresa.zona_horaria || 'America/Bogota';
-            document.getElementById('direccionEmpresa').value = empresa.direccion || '';
-            document.getElementById('mensajeBienvenida').value = empresa.mensaje_bienvenida || '';
-            document.getElementById('mensajeConfirmacion').value = empresa.mensaje_confirmacion || '';
-        }
+        <!-- ══ SERVICIOS ══ -->
+        <section id="secServicios" class="fade-in" style="display:none; padding:2.5rem;">
+            <div style="max-width:900px; margin:0 auto;">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:2rem;">
+                    <div>
+                        <h2 style="font-size:1.6rem; font-weight:800; color:#fff; margin:0 0 4px;">Servicios</h2>
+                        <p style="color:#4b5563; font-size:0.875rem; margin:0;">Configura los servicios de cada empresa</p>
+                    </div>
+                    <button id="btnNuevoServicio" onclick="abrirModalServicio()" class="btn-gold" style="padding:0.6rem 1.25rem; border-radius:10px; border:none; cursor:pointer; font-size:0.8rem; display:none; align-items:center; gap:6px;">
+                        <i class="fas fa-plus"></i> Nuevo servicio
+                    </button>
+                </div>
 
-        function mostrarEmpresaNoEncontrada() {
-            document.getElementById('empresaExistente').classList.add('hidden');
-            document.getElementById('empresaNoEncontrada').classList.remove('hidden');
+                <!-- Empresa selector -->
+                <div class="card" style="padding:1.25rem; margin-bottom:1.5rem;">
+                    <label style="display:block; font-size:0.75rem; font-weight:600; color:#6b7280; margin-bottom:0.5rem; letter-spacing:0.05em;">EMPRESA</label>
+                    <select id="selectorEmpresaServicios" class="field input-glow" onchange="onEmpresaServiciosChange()"
+                        style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem; cursor:pointer;">
+                        <option value="">— Selecciona una empresa —</option>
+                    </select>
+                </div>
 
-            // Limpiar formulario
-            document.getElementById('empresaId').value = '';
-            document.getElementById('nombreEmpresaInput').value = '';
-            document.getElementById('descripcionEmpresa').value = '';
-            document.getElementById('telefonoEmpresa').value = '';
-            document.getElementById('zonaHoraria').value = 'America/Bogota';
-            document.getElementById('direccionEmpresa').value = '';
-            document.getElementById('mensajeBienvenida').value = '';
-            document.getElementById('mensajeConfirmacion').value = '';
-        }
+                <div id="listaServicios"></div>
+            </div>
+        </section>
+    </main>
+</div>
 
-        document.getElementById('formEmpresa').addEventListener('submit', async (e) => {
-            e.preventDefault();
+<!-- ═══════════════════════════════════════════
+     MODALS
+════════════════════════════════════════════ -->
 
-            const empresaData = {
-                nombre: document.getElementById('nombreEmpresaInput').value,
-                descripcion: document.getElementById('descripcionEmpresa').value,
-                telefono: document.getElementById('telefonoEmpresa').value,
-                zona_horaria: document.getElementById('zonaHoraria').value,
-                direccion: document.getElementById('direccionEmpresa').value,
-                mensaje_bienvenida: document.getElementById('mensajeBienvenida').value,
-                mensaje_confirmacion: document.getElementById('mensajeConfirmacion').value
-            };
+<!-- Modal Empresa -->
+<div id="modalEmpresa" class="modal-bg" style="display:none; position:fixed; inset:0; z-index:100; align-items:center; justify-content:center; padding:1rem;">
+    <div class="modal-box" style="width:100%; max-width:640px; max-height:90vh; overflow-y:auto; padding:2rem;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem;">
+            <h3 id="modalEmpresaTitulo" style="font-size:1.1rem; font-weight:700; color:#fff; margin:0;">Nueva empresa</h3>
+            <button onclick="cerrarModal('modalEmpresa')" style="background:none; border:none; cursor:pointer; color:#4b5563; font-size:1.1rem;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#4b5563'">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <form id="formEmpresa">
+            <input type="hidden" id="empresaIdInput">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+                <div style="grid-column:1/-1;">
+                    <label class="lbl">Nombre de la empresa *</label>
+                    <input id="empNombre" type="text" placeholder="Ej: Xheros Barber" class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem;">
+                </div>
+                <div style="grid-column:1/-1;">
+                    <label class="lbl">Descripción</label>
+                    <textarea id="empDescripcion" rows="2" placeholder="Breve descripción de tu negocio" class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem; resize:none;"></textarea>
+                </div>
+                <div>
+                    <label class="lbl">Teléfono de contacto</label>
+                    <input id="empTelefono" type="text" placeholder="573001234567" class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem;">
+                </div>
+                <div>
+                    <label class="lbl">Zona horaria</label>
+                    <select id="empZona" class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem; cursor:pointer;">
+                        <option value="America/Bogota">🇨🇴 America/Bogota</option>
+                        <option value="America/Mexico_City">🇲🇽 America/Mexico_City</option>
+                        <option value="America/Argentina/Buenos_Aires">🇦🇷 America/Buenos_Aires</option>
+                        <option value="America/Lima">🇵🇪 America/Lima</option>
+                        <option value="America/Santiago">🇨🇱 America/Santiago</option>
+                        <option value="America/Caracas">🇻🇪 America/Caracas</option>
+                    </select>
+                </div>
+                <div style="grid-column:1/-1;">
+                    <label class="lbl">Dirección</label>
+                    <input id="empDireccion" type="text" placeholder="Ej: Calle 123 #45-67, Bogotá" class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem;">
+                </div>
+                <div style="grid-column:1/-1;">
+                    <label class="lbl">Mensaje de bienvenida del bot</label>
+                    <textarea id="empBienvenida" rows="2" placeholder="¡Hola! Bienvenido a {nombre_negocio} 👋..." class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem; resize:none;"></textarea>
+                    <p style="font-size:0.7rem; color:#4b5563; margin-top:4px;">Variable disponible: <code style="color:#f59e0b;">{nombre_negocio}</code></p>
+                </div>
+                <div style="grid-column:1/-1;">
+                    <label class="lbl">Mensaje de confirmación de cita</label>
+                    <textarea id="empConfirmacion" rows="3" placeholder="¡Perfecto {nombre}! Tu cita de {servicio} quedó agendada para el {fecha} a las {hora}..." class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem; resize:none;"></textarea>
+                    <p style="font-size:0.7rem; color:#4b5563; margin-top:4px;">Variables: <code style="color:#f59e0b;">{nombre} {servicio} {fecha} {hora} {nombre_negocio}</code></p>
+                </div>
+            </div>
+            <div style="display:flex; gap:0.75rem; margin-top:1.5rem;">
+                <button type="button" onclick="cerrarModal('modalEmpresa')" style="flex:1; padding:0.75rem; border-radius:10px; border:1px solid #2a2a35; background:none; color:#9ca3af; font-size:0.875rem; cursor:pointer; font-weight:500;" onmouseover="this.style.background='rgba(255,255,255,0.04)'" onmouseout="this.style.background='none'">
+                    Cancelar
+                </button>
+                <button type="submit" class="btn-gold" style="flex:2; padding:0.75rem; border-radius:10px; border:none; cursor:pointer; font-size:0.875rem; display:flex; align-items:center; justify-content:center; gap:6px;">
+                    <i class="fas fa-save"></i> Guardar empresa
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
 
-            try {
-                let res;
-                if (empresaActual && empresaActual.id) {
-                    // Actualizar
-                    res = await fetch(`/api/admin/empresas/${empresaActual.id}`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(empresaData)
-                    });
-                } else {
-                    // Crear
-                    res = await fetch('/api/admin/empresas', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(empresaData)
-                    });
-                }
+<!-- Modal Trabajador -->
+<div id="modalTrabajador" class="modal-bg" style="display:none; position:fixed; inset:0; z-index:100; align-items:center; justify-content:center; padding:1rem;">
+    <div class="modal-box" style="width:100%; max-width:500px; padding:2rem;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem;">
+            <h3 id="modalTrabajadorTitulo" style="font-size:1.1rem; font-weight:700; color:#fff; margin:0;">Agregar trabajador</h3>
+            <button onclick="cerrarModal('modalTrabajador')" style="background:none; border:none; cursor:pointer; color:#4b5563; font-size:1.1rem;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#4b5563'">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <form id="formTrabajador">
+            <input type="hidden" id="trabId">
+            <div style="display:flex; flex-direction:column; gap:1rem;">
+                <div>
+                    <label class="lbl">Nombre del trabajador</label>
+                    <input id="trabNombre" type="text" placeholder="Ej: Carlos Gómez" class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem;">
+                </div>
+                <div>
+                    <label class="lbl">Número de WhatsApp del bot *</label>
+                    <input id="trabTelefono" type="text" placeholder="573001234567 (con código de país, sin +)" class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem;">
+                    <p style="font-size:0.7rem; color:#4b5563; margin-top:4px;">Este número identifica el bot de WhatsApp de este trabajador</p>
+                </div>
+                <div>
+                    <label class="lbl">Empresa asignada</label>
+                    <select id="trabEmpresa" class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem; cursor:pointer;">
+                        <option value="">— Sin empresa asignada —</option>
+                    </select>
+                </div>
+            </div>
+            <div style="display:flex; gap:0.75rem; margin-top:1.5rem;">
+                <button type="button" onclick="cerrarModal('modalTrabajador')" style="flex:1; padding:0.75rem; border-radius:10px; border:1px solid #2a2a35; background:none; color:#9ca3af; font-size:0.875rem; cursor:pointer; font-weight:500;" onmouseover="this.style.background='rgba(255,255,255,0.04)'" onmouseout="this.style.background='none'">
+                    Cancelar
+                </button>
+                <button type="submit" class="btn-gold" style="flex:2; padding:0.75rem; border-radius:10px; border:none; cursor:pointer; font-size:0.875rem; display:flex; align-items:center; justify-content:center; gap:6px;">
+                    <i class="fas fa-save"></i> Guardar
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
 
-                const data = await res.json();
+<!-- Modal Servicio -->
+<div id="modalServicio" class="modal-bg" style="display:none; position:fixed; inset:0; z-index:100; align-items:center; justify-content:center; padding:1rem;">
+    <div class="modal-box" style="width:100%; max-width:500px; padding:2rem;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem;">
+            <h3 id="modalServicioTitulo" style="font-size:1.1rem; font-weight:700; color:#fff; margin:0;">Nuevo servicio</h3>
+            <button onclick="cerrarModal('modalServicio')" style="background:none; border:none; cursor:pointer; color:#4b5563; font-size:1.1rem;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#4b5563'">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <form id="formServicio">
+            <input type="hidden" id="servicioIdInput">
+            <div style="display:flex; flex-direction:column; gap:1rem;">
+                <div>
+                    <label class="lbl">Nombre del servicio *</label>
+                    <input id="servNombre" type="text" placeholder="Ej: Corte clásico" class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem;">
+                </div>
+                <div>
+                    <label class="lbl">Descripción</label>
+                    <textarea id="servDescripcion" rows="2" placeholder="Descripción breve del servicio" class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem; resize:none;"></textarea>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+                    <div>
+                        <label class="lbl">Precio (COP) *</label>
+                        <input id="servPrecio" type="number" placeholder="45000" class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem;">
+                    </div>
+                    <div>
+                        <label class="lbl">Duración (min)</label>
+                        <input id="servDuracion" type="number" value="60" class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem;">
+                    </div>
+                </div>
+            </div>
+            <div style="display:flex; gap:0.75rem; margin-top:1.5rem;">
+                <button type="button" onclick="cerrarModal('modalServicio')" style="flex:1; padding:0.75rem; border-radius:10px; border:1px solid #2a2a35; background:none; color:#9ca3af; font-size:0.875rem; cursor:pointer; font-weight:500;" onmouseover="this.style.background='rgba(255,255,255,0.04)'" onmouseout="this.style.background='none'">
+                    Cancelar
+                </button>
+                <button type="submit" class="btn-gold" style="flex:2; padding:0.75rem; border-radius:10px; border:none; cursor:pointer; font-size:0.875rem; display:flex; align-items:center; justify-content:center; gap:6px;">
+                    <i class="fas fa-save"></i> Guardar
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
 
-                if (res.ok) {
-                    empresaActual = data;
-                    mostrarEmpresaExistente(data);
-                    
-                    // Asignar empresa al trabajador
-                    await fetch('/api/admin/empresas/assign', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            telefono_bot: telefonoBotActual,
-                            empresa_id: data.id,
-                            nombre_trabajador: data.nombre
-                        })
-                    });
+<!-- Toast notification -->
+<div id="toast" style="display:none; position:fixed; bottom:1.5rem; right:1.5rem; z-index:200; animation:fadeSlide 0.2s ease;">
+    <div id="toastInner" style="display:flex; align-items:center; gap:10px; padding:0.85rem 1.25rem; border-radius:12px; font-size:0.8rem; font-weight:500; min-width:220px; max-width:360px;">
+        <i id="toastIcon"></i>
+        <span id="toastMsg"></span>
+    </div>
+</div>
 
-                    mostrarMensaje('Empresa guardada correctamente');
-                    cargarServicios(data.id);
-                } else {
-                    alert('Error al guardar la empresa: ' + (data.error || 'Error desconocido'));
-                }
-            } catch (error) {
-                console.error('Error guardando empresa:', error);
-                alert('Error al guardar la empresa');
-            }
+<style>
+    .lbl { display:block; font-size:0.75rem; font-weight:600; color:#6b7280; margin-bottom:0.4rem; letter-spacing:0.04em; text-transform:uppercase; }
+</style>
+
+<script>
+// ─────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────
+let token = localStorage.getItem('adminToken');
+let empresasCache = [];
+let trabajadoresCache = [];
+let serviciosCache = [];
+let empresaServiciosActual = null;
+let editingEmpresaId = null;
+let editingTrabajadorId = null;
+let editingServicioId = null;
+let toastTimer = null;
+
+// ─────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', async () => {
+    if (token) {
+        const ok = await checkToken();
+        if (ok) { mostrarDashboard(); return; }
+    }
+    mostrarLogin();
+});
+
+async function checkToken() {
+    try {
+        const res = await apiFetch('GET', '/api/admin/validate');
+        return res.ok;
+    } catch { return false; }
+}
+
+function mostrarLogin() {
+    document.getElementById('loginScreen').style.display = 'flex';
+    document.getElementById('dashboard').style.display = 'none';
+}
+
+function mostrarDashboard() {
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('dashboard').style.display = 'flex';
+    document.getElementById('sidebarUser').textContent = localStorage.getItem('adminUser') || 'Admin';
+    showSection('empresas');
+}
+
+// ─────────────────────────────────────────────
+// AUTH
+// ─────────────────────────────────────────────
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('loginBtn');
+    const errDiv = document.getElementById('loginError');
+    const usuario = document.getElementById('loginUser').value.trim();
+    const password = document.getElementById('loginPass').value;
+
+    if (!usuario || !password) { showToast('Completa todos los campos', 'error'); return; }
+
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Verificando...';
+    btn.disabled = true;
+    errDiv.style.display = 'none';
+
+    try {
+        const res = await fetch('/api/admin/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ usuario, password })
         });
+        const data = await res.json();
 
-        async function cargarServicios(empresaId) {
-            try {
-                const res = await fetch(`/api/admin/servicios/empresa/${empresaId}`);
-                const servicios = await res.json();
+        if (res.ok) {
+            token = data.token;
+            localStorage.setItem('adminToken', token);
+            localStorage.setItem('adminUser', data.usuario || usuario);
+            mostrarDashboard();
+        } else {
+            document.getElementById('loginErrorMsg').textContent = data.error || 'Credenciales incorrectas';
+            errDiv.style.display = 'block';
+        }
+    } catch {
+        document.getElementById('loginErrorMsg').textContent = 'Error de conexión con el servidor';
+        errDiv.style.display = 'block';
+    } finally {
+        btn.innerHTML = '<i class="fas fa-sign-in-alt"></i> Iniciar sesión';
+        btn.disabled = false;
+    }
+});
 
-                const lista = document.getElementById('listaServicios');
-                
-                if (servicios.length === 0) {
-                    lista.innerHTML = '<p class="text-gray-400 text-center py-8">No hay servicios configurados. Agrega el primero.</p>';
-                    return;
-                }
+async function doLogout() {
+    try { await apiFetch('POST', '/api/admin/logout'); } catch {}
+    token = null;
+    localStorage.removeItem('adminToken');
+    localStorage.removeItem('adminUser');
+    mostrarLogin();
+}
 
-                lista.innerHTML = servicios.map(s => `
-                    <div class="bg-gray-700 rounded-lg p-4 flex justify-between items-center">
-                        <div>
-                            <h4 class="font-semibold text-white">${s.nombre}</h4>
-                            <p class="text-gray-400 text-sm">${s.descripcion || 'Sin descripción'}</p>
-                            <p class="text-amber-400 font-semibold">$${s.precio.toLocaleString()} COP • ${s.duracion_minutos} min</p>
-                        </div>
-                        <div class="flex gap-2">
-                            <button onclick="editarServicio('${s.id}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg transition-colors">
-                                <i class="fas fa-edit"></i>
-                            </button>
-                            <button onclick="eliminarServicio('${s.id}')" class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg transition-colors">
-                                <i class="fas fa-trash"></i>
-                            </button>
+// ─────────────────────────────────────────────
+// API HELPER
+// ─────────────────────────────────────────────
+async function apiFetch(method, path, body = null) {
+    const opts = {
+        method,
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+        }
+    };
+    if (body) opts.body = JSON.stringify(body);
+    const res = await fetch(path, opts);
+    if (res.status === 401) {
+        token = null;
+        localStorage.removeItem('adminToken');
+        mostrarLogin();
+        throw new Error('unauthorized');
+    }
+    return res;
+}
+
+// ─────────────────────────────────────────────
+// NAVIGATION
+// ─────────────────────────────────────────────
+function showSection(sec) {
+    // Nav items
+    ['empresas','trabajadores','servicios'].forEach(s => {
+        const el = document.getElementById(`nav-${s}`);
+        el.classList.remove('active');
+        el.style.color = '#6b7280';
+    });
+    const active = document.getElementById(`nav-${sec}`);
+    active.classList.add('active');
+    active.style.color = '#fbbf24';
+
+    // Sections
+    ['Empresas','Trabajadores','Servicios'].forEach(s => {
+        document.getElementById(`sec${s}`).style.display = 'none';
+    });
+    const secMap = { empresas:'secEmpresas', trabajadores:'secTrabajadores', servicios:'secServicios' };
+    document.getElementById(secMap[sec]).style.display = 'block';
+
+    // Load
+    if (sec === 'empresas') cargarEmpresas();
+    else if (sec === 'trabajadores') { cargarEmpresas().then(cargarTrabajadores); }
+    else if (sec === 'servicios') poblarSelectorEmpresaServicios();
+}
+
+// ─────────────────────────────────────────────
+// EMPRESAS
+// ─────────────────────────────────────────────
+async function cargarEmpresas() {
+    try {
+        const res = await apiFetch('GET', '/api/admin/empresas');
+        empresasCache = await res.json();
+        renderEmpresas();
+    } catch (e) { if (e.message !== 'unauthorized') console.error(e); }
+}
+
+function renderEmpresas() {
+    const el = document.getElementById('listaEmpresas');
+    if (!empresasCache.length) {
+        el.innerHTML = `
+            <div style="text-align:center; padding:4rem 0; color:#374151;">
+                <i class="fas fa-building" style="font-size:2.5rem; margin-bottom:1rem; display:block; color:#1f2937;"></i>
+                <p style="margin-bottom:1rem;">No hay empresas registradas todavía</p>
+                <button onclick="abrirModalEmpresa()" class="btn-gold" style="padding:0.6rem 1.25rem; border-radius:10px; border:none; cursor:pointer; font-size:0.8rem;">
+                    <i class="fas fa-plus" style="margin-right:6px;"></i>Crear primera empresa
+                </button>
+            </div>`;
+        return;
+    }
+
+    el.innerHTML = empresasCache.map(emp => `
+        <div class="card fade-in" style="margin-bottom:1rem; padding:1.5rem;">
+            <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:1rem;">
+                <div style="display:flex; align-items:center; gap:1rem; flex:1; min-width:0;">
+                    <div style="width:48px; height:48px; border-radius:12px; background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.25); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                        <i class="fas fa-store" style="color:#f59e0b;"></i>
+                    </div>
+                    <div style="min-width:0;">
+                        <h3 style="font-size:1rem; font-weight:700; color:#fff; margin:0 0 3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escHtml(emp.nombre)}</h3>
+                        ${emp.descripcion ? `<p style="font-size:0.8rem; color:#6b7280; margin:0 0 6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escHtml(emp.descripcion)}</p>` : ''}
+                        <div style="display:flex; flex-wrap:wrap; gap:10px;">
+                            ${emp.telefono ? `<span style="font-size:0.72rem; color:#6b7280;"><i class="fas fa-phone" style="margin-right:4px;"></i>${escHtml(emp.telefono)}</span>` : ''}
+                            ${emp.direccion ? `<span style="font-size:0.72rem; color:#6b7280;"><i class="fas fa-map-marker-alt" style="margin-right:4px;"></i>${escHtml(emp.direccion)}</span>` : ''}
+                            <span style="font-size:0.72rem; color:#6b7280;"><i class="fas fa-globe" style="margin-right:4px;"></i>${escHtml(emp.zona_horaria || 'America/Bogota')}</span>
                         </div>
                     </div>
-                `).join('');
-            } catch (error) {
-                console.error('Error cargando servicios:', error);
-            }
+                </div>
+                <button onclick="editarEmpresa('${emp.id}')" style="background:rgba(255,255,255,0.04); border:1px solid #2a2a35; color:#9ca3af; padding:6px 12px; border-radius:8px; cursor:pointer; font-size:0.78rem; white-space:nowrap; flex-shrink:0;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#9ca3af'">
+                    <i class="fas fa-edit" style="margin-right:5px;"></i>Editar
+                </button>
+            </div>
+
+            ${emp.mensaje_bienvenida ? `
+            <div class="card-inner" style="margin-top:1rem; padding:0.85rem 1rem;">
+                <p style="font-size:0.7rem; color:#4b5563; margin:0 0 4px; text-transform:uppercase; font-weight:600; letter-spacing:0.05em;">Mensaje de bienvenida</p>
+                <p style="font-size:0.8rem; color:#9ca3af; margin:0;">${escHtml(emp.mensaje_bienvenida.substring(0,150))}${emp.mensaje_bienvenida.length > 150 ? '…' : ''}</p>
+            </div>` : ''}
+        </div>
+    `).join('');
+}
+
+function abrirModalEmpresa() {
+    editingEmpresaId = null;
+    document.getElementById('modalEmpresaTitulo').textContent = 'Nueva empresa';
+    document.getElementById('formEmpresa').reset();
+    document.getElementById('empresaIdInput').value = '';
+    abrirModal('modalEmpresa');
+}
+
+function editarEmpresa(id) {
+    const emp = empresasCache.find(e => e.id === id);
+    if (!emp) return;
+    editingEmpresaId = id;
+    document.getElementById('modalEmpresaTitulo').textContent = 'Editar empresa';
+    document.getElementById('empresaIdInput').value = emp.id;
+    document.getElementById('empNombre').value = emp.nombre || '';
+    document.getElementById('empDescripcion').value = emp.descripcion || '';
+    document.getElementById('empTelefono').value = emp.telefono || '';
+    document.getElementById('empZona').value = emp.zona_horaria || 'America/Bogota';
+    document.getElementById('empDireccion').value = emp.direccion || '';
+    document.getElementById('empBienvenida').value = emp.mensaje_bienvenida || '';
+    document.getElementById('empConfirmacion').value = emp.mensaje_confirmacion || '';
+    abrirModal('modalEmpresa');
+}
+
+document.getElementById('formEmpresa').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const nombre = document.getElementById('empNombre').value.trim();
+    if (!nombre) { showToast('El nombre es requerido', 'error'); return; }
+
+    const data = {
+        nombre,
+        descripcion: document.getElementById('empDescripcion').value.trim(),
+        telefono: document.getElementById('empTelefono').value.trim(),
+        zona_horaria: document.getElementById('empZona').value,
+        direccion: document.getElementById('empDireccion').value.trim(),
+        mensaje_bienvenida: document.getElementById('empBienvenida').value.trim(),
+        mensaje_confirmacion: document.getElementById('empConfirmacion').value.trim()
+    };
+
+    try {
+        let res;
+        if (editingEmpresaId) {
+            res = await apiFetch('PUT', `/api/admin/empresas/${editingEmpresaId}`, data);
+        } else {
+            res = await apiFetch('POST', '/api/admin/empresas', data);
         }
-
-        function mostrarFormServicio() {
-            document.getElementById('formServicio').classList.remove('hidden');
-            document.getElementById('servicioId').value = '';
-            document.getElementById('nombreServicio').value = '';
-            document.getElementById('descripcionServicio').value = '';
-            document.getElementById('precioServicio').value = '';
-            document.getElementById('duracionServicio').value = '60';
+        if (res.ok) {
+            cerrarModal('modalEmpresa');
+            showToast(editingEmpresaId ? 'Empresa actualizada ✓' : 'Empresa creada ✓');
+            await cargarEmpresas();
+        } else {
+            const err = await res.json();
+            showToast(err.error || 'Error al guardar', 'error');
         }
+    } catch (err) { if (err.message !== 'unauthorized') showToast('Error de conexión', 'error'); }
+});
 
-        function ocultarFormServicio() {
-            document.getElementById('formServicio').classList.add('hidden');
+// ─────────────────────────────────────────────
+// TRABAJADORES
+// ─────────────────────────────────────────────
+async function cargarTrabajadores() {
+    try {
+        const res = await apiFetch('GET', '/api/admin/trabajadores');
+        trabajadoresCache = await res.json();
+        renderTrabajadores();
+    } catch (e) { if (e.message !== 'unauthorized') console.error(e); }
+}
+
+function renderTrabajadores() {
+    const el = document.getElementById('listaTrabajadores');
+    if (!trabajadoresCache.length) {
+        el.innerHTML = `
+            <div style="text-align:center; padding:4rem 0; color:#374151;">
+                <i class="fas fa-users" style="font-size:2.5rem; margin-bottom:1rem; display:block; color:#1f2937;"></i>
+                <p style="margin-bottom:1rem;">No hay trabajadores registrados todavía</p>
+                <button onclick="abrirModalTrabajador()" class="btn-gold" style="padding:0.6rem 1.25rem; border-radius:10px; border:none; cursor:pointer; font-size:0.8rem;">
+                    <i class="fas fa-user-plus" style="margin-right:6px;"></i>Agregar primero
+                </button>
+            </div>`;
+        return;
+    }
+
+    el.innerHTML = trabajadoresCache.map(t => {
+        const calConectado = !!t.refresh_token;
+        const emailVinculado = !!t.correo;
+        const empresaNombre = t.empresas?.nombre || null;
+
+        return `
+        <div class="card fade-in" style="margin-bottom:1rem; padding:1.5rem;">
+            <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:1rem;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <div style="width:44px; height:44px; border-radius:12px; background:#16161c; border:1px solid #22222c; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                        <i class="fas fa-user" style="color:#6b7280; font-size:0.9rem;"></i>
+                    </div>
+                    <div>
+                        <h3 style="font-size:0.95rem; font-weight:700; color:#fff; margin:0 0 2px;">${escHtml(t.nombre || 'Sin nombre')}</h3>
+                        <p style="font-size:0.75rem; color:#4b5563; margin:0;">${empresaNombre ? escHtml(empresaNombre) : 'Sin empresa asignada'}</p>
+                    </div>
+                </div>
+                <button onclick="editarTrabajador('${t.id}')" style="background:rgba(255,255,255,0.04); border:1px solid #2a2a35; color:#9ca3af; padding:6px 12px; border-radius:8px; cursor:pointer; font-size:0.78rem; white-space:nowrap; flex-shrink:0;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#9ca3af'">
+                    <i class="fas fa-edit" style="margin-right:5px;"></i>Editar
+                </button>
+            </div>
+
+            <!-- Estado badges -->
+            <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:1rem;">
+                <!-- WhatsApp -->
+                <span class="badge-green" style="display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:99px; font-size:0.72rem; font-weight:500;">
+                    <i class="fab fa-whatsapp"></i> ${escHtml(t.telefono_bot)}
+                </span>
+
+                <!-- Email -->
+                <span class="${emailVinculado ? 'badge-green' : 'badge-gray'}" style="display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:99px; font-size:0.72rem; font-weight:500;">
+                    <i class="fas fa-envelope"></i>
+                    ${emailVinculado ? escHtml(t.correo) : 'Email no vinculado'}
+                </span>
+
+                <!-- Google Calendar -->
+                <span class="${calConectado ? 'badge-green' : 'badge-red'}" style="display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:99px; font-size:0.72rem; font-weight:500;">
+                    <span class="dot ${calConectado ? 'dot-green' : 'dot-red'}"></span>
+                    ${calConectado ? 'Google Calendar activo' : 'Calendar no conectado'}
+                </span>
+            </div>
+
+            <!-- Enlace de vinculación si no tiene Calendar -->
+            ${!calConectado ? `
+            <div class="link-strip" style="margin-top:1rem; padding:0.9rem 1rem; display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+                <div>
+                    <p style="font-size:0.8rem; font-weight:600; color:#f59e0b; margin:0 0 2px;">Vincular Google Calendar</p>
+                    <p style="font-size:0.72rem; color:#6b7280; margin:0;">Comparte este enlace con el trabajador para que conecte su cuenta</p>
+                </div>
+                <button onclick="copiarEnlaceCalendar('${t.telefono_bot}')" style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.3); color:#f59e0b; padding:7px 14px; border-radius:8px; cursor:pointer; font-size:0.78rem; font-weight:600; white-space:nowrap; flex-shrink:0; transition:all 0.15s;" onmouseover="this.style.background='rgba(245,158,11,0.2)'" onmouseout="this.style.background='rgba(245,158,11,0.12)'">
+                    <i class="fas fa-link" style="margin-right:5px;"></i>Copiar enlace
+                </button>
+            </div>` : `
+            <div style="margin-top:1rem; display:flex; justify-content:flex-end;">
+                <button onclick="desconectarCalendar('${t.id}', '${escHtml(t.nombre || 'este trabajador')}')" style="background:rgba(239,68,68,0.07); border:1px solid rgba(239,68,68,0.2); color:#f87171; padding:5px 12px; border-radius:8px; cursor:pointer; font-size:0.72rem;" onmouseover="this.style.background='rgba(239,68,68,0.15)'" onmouseout="this.style.background='rgba(239,68,68,0.07)'">
+                    <i class="fas fa-unlink" style="margin-right:5px;"></i>Desconectar calendar
+                </button>
+            </div>`}
+        </div>`;
+    }).join('');
+}
+
+function abrirModalTrabajador() {
+    editingTrabajadorId = null;
+    document.getElementById('modalTrabajadorTitulo').textContent = 'Agregar trabajador';
+    document.getElementById('formTrabajador').reset();
+    document.getElementById('trabId').value = '';
+    document.getElementById('trabTelefono').readOnly = false;
+    document.getElementById('trabTelefono').style.opacity = '1';
+    poblarSelectEmpresas('trabEmpresa');
+    abrirModal('modalTrabajador');
+}
+
+function editarTrabajador(id) {
+    const t = trabajadoresCache.find(x => x.id === id);
+    if (!t) return;
+    editingTrabajadorId = id;
+    document.getElementById('modalTrabajadorTitulo').textContent = 'Editar trabajador';
+    document.getElementById('trabId').value = t.id;
+    document.getElementById('trabNombre').value = t.nombre || '';
+    document.getElementById('trabTelefono').value = t.telefono_bot || '';
+    document.getElementById('trabTelefono').readOnly = true;
+    document.getElementById('trabTelefono').style.opacity = '0.5';
+    poblarSelectEmpresas('trabEmpresa', t.empresa_id);
+    abrirModal('modalTrabajador');
+}
+
+document.getElementById('formTrabajador').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const telefono = document.getElementById('trabTelefono').value.trim();
+    if (!telefono) { showToast('El número de WhatsApp es requerido', 'error'); return; }
+
+    try {
+        let res;
+        if (editingTrabajadorId) {
+            res = await apiFetch('PUT', `/api/admin/trabajadores/${editingTrabajadorId}`, {
+                nombre: document.getElementById('trabNombre').value.trim(),
+                empresa_id: document.getElementById('trabEmpresa').value || null
+            });
+        } else {
+            res = await apiFetch('POST', '/api/admin/trabajadores', {
+                telefono_bot: telefono,
+                nombre: document.getElementById('trabNombre').value.trim(),
+                empresa_id: document.getElementById('trabEmpresa').value || null
+            });
         }
+        if (res.ok) {
+            cerrarModal('modalTrabajador');
+            showToast(editingTrabajadorId ? 'Trabajador actualizado ✓' : 'Trabajador registrado ✓');
+            await cargarTrabajadores();
+        } else {
+            const err = await res.json();
+            showToast(err.error || 'Error al guardar', 'error');
+        }
+    } catch (err) { if (err.message !== 'unauthorized') showToast('Error de conexión', 'error'); }
+});
 
-        document.getElementById('formServicioData').addEventListener('submit', async (e) => {
-            e.preventDefault();
-
-            const servicioData = {
-                empresa_id: empresaActual.id,
-                nombre: document.getElementById('nombreServicio').value,
-                descripcion: document.getElementById('descripcionServicio').value,
-                precio: parseInt(document.getElementById('precioServicio').value),
-                duracion_minutos: parseInt(document.getElementById('duracionServicio').value)
-            };
-
-            const servicioId = document.getElementById('servicioId').value;
-
-            try {
-                let res;
-                if (servicioId) {
-                    res = await fetch(`/api/admin/servicios/${servicioId}`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(servicioData)
-                    });
-                } else {
-                    res = await fetch('/api/admin/servicios', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(servicioData)
-                    });
-                }
-
-                if (res.ok) {
-                    ocultarFormServicio();
-                    cargarServicios(empresaActual.id);
-                    mostrarMensaje('Servicio guardado correctamente');
-                } else {
-                    alert('Error al guardar el servicio');
-                }
-            } catch (error) {
-                console.error('Error guardando servicio:', error);
-                alert('Error al guardar el servicio');
-            }
+function copiarEnlaceCalendar(telefonoBot) {
+    const url = `${window.location.origin}/auth/google?telefono_bot=${encodeURIComponent(telefonoBot)}`;
+    navigator.clipboard.writeText(url)
+        .then(() => showToast('Enlace copiado al portapapeles 📋'))
+        .catch(() => {
+            prompt('Copia este enlace manualmente:', url);
         });
+}
 
-        async function editarServicio(id) {
-            try {
-                const res = await fetch(`/api/admin/servicios/empresa/${empresaActual.id}`);
-                const servicios = await res.json();
-                const servicio = servicios.find(s => s.id === id);
-
-                if (servicio) {
-                    document.getElementById('formServicio').classList.remove('hidden');
-                    document.getElementById('servicioId').value = servicio.id;
-                    document.getElementById('nombreServicio').value = servicio.nombre;
-                    document.getElementById('descripcionServicio').value = servicio.descripcion || '';
-                    document.getElementById('precioServicio').value = servicio.precio;
-                    document.getElementById('duracionServicio').value = servicio.duracion_minutos;
-                }
-            } catch (error) {
-                console.error('Error cargando servicio:', error);
-            }
+async function desconectarCalendar(id, nombre) {
+    if (!confirm(`¿Seguro que quieres desconectar Google Calendar de ${nombre}?`)) return;
+    try {
+        const res = await apiFetch('DELETE', `/api/admin/trabajadores/${id}/calendar`);
+        if (res.ok) {
+            showToast('Calendar desconectado');
+            await cargarTrabajadores();
+        } else {
+            showToast('Error al desconectar', 'error');
         }
+    } catch (e) { if (e.message !== 'unauthorized') showToast('Error de conexión', 'error'); }
+}
 
-        async function eliminarServicio(id) {
-            if (!confirm('¿Estás seguro de eliminar este servicio?')) return;
+// ─────────────────────────────────────────────
+// SERVICIOS
+// ─────────────────────────────────────────────
+function poblarSelectorEmpresaServicios() {
+    const sel = document.getElementById('selectorEmpresaServicios');
+    sel.innerHTML = '<option value="">— Selecciona una empresa —</option>';
+    empresasCache.forEach(e => {
+        sel.innerHTML += `<option value="${e.id}">${escHtml(e.nombre)}</option>`;
+    });
+    document.getElementById('listaServicios').innerHTML = '';
+    document.getElementById('btnNuevoServicio').style.display = 'none';
+}
 
-            try {
-                const res = await fetch(`/api/admin/servicios/${id}`, {
-                    method: 'DELETE'
-                });
+async function onEmpresaServiciosChange() {
+    const id = document.getElementById('selectorEmpresaServicios').value;
+    empresaServiciosActual = id || null;
+    const btn = document.getElementById('btnNuevoServicio');
+    if (!id) {
+        btn.style.display = 'none';
+        document.getElementById('listaServicios').innerHTML = '';
+        return;
+    }
+    btn.style.display = 'flex';
+    await cargarServicios(id);
+}
 
-                if (res.ok) {
-                    cargarServicios(empresaActual.id);
-                    mostrarMensaje('Servicio eliminado correctamente');
-                } else {
-                    alert('Error al eliminar el servicio');
-                }
-            } catch (error) {
-                console.error('Error eliminando servicio:', error);
-                alert('Error al eliminar el servicio');
-            }
+async function cargarServicios(empresaId) {
+    try {
+        const res = await apiFetch('GET', `/api/admin/servicios/empresa/${empresaId}`);
+        serviciosCache = await res.json();
+        renderServicios();
+    } catch (e) { if (e.message !== 'unauthorized') console.error(e); }
+}
+
+function renderServicios() {
+    const el = document.getElementById('listaServicios');
+    if (!serviciosCache.length) {
+        el.innerHTML = `
+            <div style="text-align:center; padding:3rem 0; color:#374151;">
+                <i class="fas fa-concierge-bell" style="font-size:2rem; margin-bottom:0.75rem; display:block; color:#1f2937;"></i>
+                <p>No hay servicios. Agrega el primero.</p>
+            </div>`;
+        return;
+    }
+
+    el.innerHTML = serviciosCache.map(s => `
+        <div class="card fade-in" style="margin-bottom:0.75rem; padding:1.1rem 1.25rem; display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+            <div style="display:flex; align-items:center; gap:12px; min-width:0;">
+                <div style="width:40px; height:40px; border-radius:10px; background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.2); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                    <i class="fas fa-cut" style="color:#f59e0b; font-size:0.85rem;"></i>
+                </div>
+                <div style="min-width:0;">
+                    <h4 style="font-size:0.875rem; font-weight:600; color:#fff; margin:0 0 2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escHtml(s.nombre)}</h4>
+                    ${s.descripcion ? `<p style="font-size:0.75rem; color:#6b7280; margin:0 0 4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escHtml(s.descripcion)}</p>` : ''}
+                    <div style="display:flex; align-items:center; gap:12px;">
+                        <span style="font-size:0.78rem; font-weight:700; color:#f59e0b;">$${Number(s.precio).toLocaleString('es-CO')} COP</span>
+                        <span style="font-size:0.72rem; color:#4b5563;"><i class="fas fa-clock" style="margin-right:3px;"></i>${s.duracion_minutos} min</span>
+                    </div>
+                </div>
+            </div>
+            <div style="display:flex; gap:6px; flex-shrink:0;">
+                <button onclick="editarServicio('${s.id}')" style="background:rgba(255,255,255,0.04); border:1px solid #2a2a35; color:#9ca3af; padding:6px 10px; border-radius:8px; cursor:pointer; font-size:0.78rem;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#9ca3af'">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button onclick="eliminarServicio('${s.id}')" style="background:rgba(239,68,68,0.07); border:1px solid rgba(239,68,68,0.2); color:#f87171; padding:6px 10px; border-radius:8px; cursor:pointer; font-size:0.78rem;" onmouseover="this.style.background='rgba(239,68,68,0.15)'" onmouseout="this.style.background='rgba(239,68,68,0.07)'">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function abrirModalServicio() {
+    editingServicioId = null;
+    document.getElementById('modalServicioTitulo').textContent = 'Nuevo servicio';
+    document.getElementById('formServicio').reset();
+    document.getElementById('servicioIdInput').value = '';
+    document.getElementById('servDuracion').value = '60';
+    abrirModal('modalServicio');
+}
+
+function editarServicio(id) {
+    const s = serviciosCache.find(x => x.id === id);
+    if (!s) return;
+    editingServicioId = id;
+    document.getElementById('modalServicioTitulo').textContent = 'Editar servicio';
+    document.getElementById('servicioIdInput').value = s.id;
+    document.getElementById('servNombre').value = s.nombre || '';
+    document.getElementById('servDescripcion').value = s.descripcion || '';
+    document.getElementById('servPrecio').value = s.precio || '';
+    document.getElementById('servDuracion').value = s.duracion_minutos || 60;
+    abrirModal('modalServicio');
+}
+
+document.getElementById('formServicio').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const nombre = document.getElementById('servNombre').value.trim();
+    const precio = parseInt(document.getElementById('servPrecio').value);
+    if (!nombre) { showToast('El nombre es requerido', 'error'); return; }
+    if (!precio || precio <= 0) { showToast('El precio debe ser mayor a 0', 'error'); return; }
+
+    const data = {
+        empresa_id: empresaServiciosActual,
+        nombre,
+        descripcion: document.getElementById('servDescripcion').value.trim(),
+        precio,
+        duracion_minutos: parseInt(document.getElementById('servDuracion').value) || 60
+    };
+
+    try {
+        let res;
+        if (editingServicioId) {
+            res = await apiFetch('PUT', `/api/admin/servicios/${editingServicioId}`, data);
+        } else {
+            res = await apiFetch('POST', '/api/admin/servicios', data);
         }
-
-        function mostrarMensaje(texto) {
-            const mensaje = document.getElementById('mensajeExito');
-            document.getElementById('textoExito').textContent = texto;
-            mensaje.classList.remove('hidden');
-            setTimeout(() => mensaje.classList.add('hidden'), 3000);
+        if (res.ok) {
+            cerrarModal('modalServicio');
+            showToast(editingServicioId ? 'Servicio actualizado ✓' : 'Servicio creado ✓');
+            await cargarServicios(empresaServiciosActual);
+        } else {
+            const err = await res.json();
+            showToast(err.error || 'Error al guardar', 'error');
         }
-    </script>
+    } catch (err) { if (err.message !== 'unauthorized') showToast('Error de conexión', 'error'); }
+});
+
+async function eliminarServicio(id) {
+    if (!confirm('¿Eliminar este servicio?')) return;
+    try {
+        const res = await apiFetch('DELETE', `/api/admin/servicios/${id}`);
+        if (res.ok) {
+            showToast('Servicio eliminado');
+            await cargarServicios(empresaServiciosActual);
+        } else {
+            showToast('Error al eliminar', 'error');
+        }
+    } catch (e) { if (e.message !== 'unauthorized') showToast('Error de conexión', 'error'); }
+}
+
+// ─────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────
+function poblarSelectEmpresas(selectId, selectedId = null) {
+    const sel = document.getElementById(selectId);
+    sel.innerHTML = '<option value="">— Sin empresa asignada —</option>';
+    empresasCache.forEach(e => {
+        sel.innerHTML += `<option value="${e.id}" ${selectedId === e.id ? 'selected' : ''}>${escHtml(e.nombre)}</option>`;
+    });
+}
+
+function abrirModal(id) {
+    document.getElementById(id).style.display = 'flex';
+}
+
+function cerrarModal(id) {
+    document.getElementById(id).style.display = 'none';
+}
+
+// Close modals on backdrop click
+document.querySelectorAll('.modal-bg').forEach(m => {
+    m.addEventListener('click', (e) => { if (e.target === m) cerrarModal(m.id); });
+});
+
+// Escape key closes modals
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        ['modalEmpresa','modalTrabajador','modalServicio'].forEach(cerrarModal);
+    }
+});
+
+function showToast(msg, type = 'success') {
+    const toast = document.getElementById('toast');
+    const inner = document.getElementById('toastInner');
+    const icon  = document.getElementById('toastIcon');
+    document.getElementById('toastMsg').textContent = msg;
+
+    if (type === 'success') {
+        inner.className = 'toast-success';
+        inner.style.cssText = 'display:flex;align-items:center;gap:10px;padding:0.85rem 1.25rem;border-radius:12px;font-size:0.8rem;font-weight:500;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.3);color:#86efac;';
+        icon.className = 'fas fa-check-circle';
+    } else {
+        inner.style.cssText = 'display:flex;align-items:center;gap:10px;padding:0.85rem 1.25rem;border-radius:12px;font-size:0.8rem;font-weight:500;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);color:#fca5a5;';
+        icon.className = 'fas fa-exclamation-circle';
+    }
+
+    toast.style.display = 'block';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.style.display = 'none', 3500);
+}
+
+function escHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g,'&amp;')
+        .replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;')
+        .replace(/'/g,'&#39;');
+}
+</script>
 </body>
 </html>
