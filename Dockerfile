@@ -1,5 +1,5 @@
 # ---- Imagen base ----
-FROM node:20-slim
+FROM node:22-slim
 
 # ---- Evitar que Puppeteer descargue su propio Chrome ----
 # Vamos a usar el Chromium que instalamos vía apt-get más abajo.
