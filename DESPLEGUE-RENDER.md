@@ -100,7 +100,7 @@ git push -u origin main
 
 **Build Command:**
 ```bash
-npm install
+npm install && npm run build
 ```
 
 **Start Command:**
@@ -124,7 +124,6 @@ En la sección **Environment**, agrega las siguientes variables:
 | `GOOGLE_REDIRECT_URI` | `https://tu-app.onrender.com/auth/google/callback` | Reemplaza con tu URL de Render |
 | `GROQ_API_KEY` | Tu API key de Groq | Obtenla de [console.groq.com](https://console.groq.com) |
 | `PORT` | `3000` | Puerto del servidor |
-| `CHROME_PATH` | `/usr/bin/chromium-browser` | Chrome del sistema en Render |
 
 ### 4.4 Configurar Persistencia (Solo Plan de Pago)
 
@@ -241,22 +240,26 @@ En la sección **Environment**, agrega las siguientes variables:
 
 ### Error: "Could not find Chrome" (Puppeteer)
 
-**Problema:** whatsapp-web.js usa Puppeteer que necesita Chrome.
+**Problema:** whatsapp-web.js usa Puppeteer que necesita Chrome, pero Render no lo tiene preinstalado.
 
-**Solución:** El proyecto está configurado para usar Chrome del sistema de Render:
+**Solución:** El proyecto usa Puppeteer para instalar Chrome automáticamente:
 
-1. **Agrega la variable de entorno `CHROME_PATH`:**
-   - Nombre: `CHROME_PATH`
-   - Valor: `/usr/bin/chromium-browser`
+1. **El `package.json` incluye:**
+   - `puppeteer` como dependencia
+   - Script `build` que instala Chrome: `npx puppeteer browsers install chrome`
 
-2. **El `bot.js` ya está configurado** para usar Chrome del sistema en Linux
+2. **El Build Command en Render debe ser:**
+   ```
+   npm install && npm run build
+   ```
 
-3. **Render tiene Chromium preinstalado**, no necesitas instalar nada extra
+3. **El `bot.js` está configurado** para usar el Chrome instalado por Puppeteer
 
 **Si aún falla:**
-- Verifica que la variable `CHROME_PATH` esté configurada correctamente
-- Revisa los logs para ver si encuentra el ejecutable
-- Si Chromium no está disponible en tu región de Render, considera usar otro servicio de hosting
+- Verifica que el Build Command incluya `npm run build`
+- Revisa los logs para ver si Chrome se instaló correctamente
+- Chrome ocupa ~300MB, asegúrate de tener suficiente espacio en el build
+- Si el build falla por tiempo, considera usar un plan de pago con más recursos
 
 ### Error de Google Calendar
 

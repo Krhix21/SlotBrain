@@ -640,9 +640,8 @@ const client = new Client({
     authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
     puppeteer: {
         headless: true,
-        // Usar Chrome del sistema en Render, o Chrome instalado localmente
-        executablePath: process.env.CHROME_PATH ||
-            process.platform === 'linux' ? '/usr/bin/chromium-browser' : undefined,
+        // Usar Chrome instalado por puppeteer (si está disponible) o dejar que puppeteer lo maneje
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
