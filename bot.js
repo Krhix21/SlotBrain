@@ -640,7 +640,9 @@ const client = new Client({
     authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
     puppeteer: {
         headless: true,
-        executablePath: process.env.CHROME_PATH || undefined, // Usar Chrome del sistema si está disponible
+        // Usar Chrome del sistema en Render, o Chrome instalado localmente
+        executablePath: process.env.CHROME_PATH ||
+            process.platform === 'linux' ? '/usr/bin/chromium-browser' : undefined,
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -649,7 +651,8 @@ const client = new Client({
             '--no-first-run',
             '--no-zygote',
             '--disable-gpu',
-            '--disable-software-rasterizer'
+            '--disable-software-rasterizer',
+            '--single-process' // Importante para Render
         ]
     }
 });
