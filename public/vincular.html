@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Xheros Barber - Configuración</title>
+</head>
+<body style="margin:0;font-family:sans-serif;background:#0c0a09;color:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;">
+  <div style="text-align:center;padding:40px;max-width:440px;">
+
+    <h1 style="color:#f59e0b;font-size:26px;margin-bottom:8px;">Xheros Barber 💈</h1>
+
+    <!-- PASO 1: escanear QR -->
+    <div id="pasoQr">
+      <p style="color:#d6d3d1;font-size:15px;line-height:1.5;">
+        Paso 1 de 2: escanea este código con tu WhatsApp
+        (Ajustes → Dispositivos vinculados → Vincular un dispositivo).
+      </p>
+      <div id="qrContainer" style="margin:20px auto;min-height:260px;display:flex;align-items:center;justify-content:center;">
+        <p id="qrCargando" style="color:#78716c;">Generando código QR...</p>
+        <img id="qrImg" style="display:none;max-width:260px;border-radius:8px;background:#fff;padding:12px;" />
+      </div>
+    </div>
+
+    <!-- PASO 2: conectar Google Calendar -->
+    <div id="pasoGoogle" style="display:none;">
+      <p style="color:#22c55e;font-size:15px;">✅ WhatsApp conectado (<span id="numeroDetectado"></span>)</p>
+      <p style="color:#d6d3d1;font-size:15px;line-height:1.5;margin-top:16px;">
+        Paso 2 de 2: conecta tu Google Calendar para que las citas se agenden automáticamente.
+      </p>
+      <a id="btnConectar"
+         style="display:inline-block;margin-top:20px;padding:14px 28px;background:#f59e0b;color:#0c0a09;
+                text-decoration:none;border-radius:8px;font-weight:bold;">
+          Conectar con Google
+      </a>
+    </div>
+
+    <!-- Todo listo -->
+    <div id="pasoListo" style="display:none;">
+      <p style="font-size:40px;">🎉</p>
+      <h2 style="color:#f59e0b;">¡Todo listo!</h2>
+      <p style="color:#d6d3d1;">
+        WhatsApp y Google Calendar (<span id="correoConectado"></span>) están conectados.
+        Ya puedes cerrar esta página.
+      </p>
+    </div>
+
+  </div>
+
+  <script>
+    const qrContainer = document.getElementById('qrContainer');
+    const qrCargando = document.getElementById('qrCargando');
+    const qrImg = document.getElementById('qrImg');
+    const pasoQr = document.getElementById('pasoQr');
+    const pasoGoogle = document.getElementById('pasoGoogle');
+    const pasoListo = document.getElementById('pasoListo');
+    const btnConectar = document.getElementById('btnConectar');
+    const numeroDetectado = document.getElementById('numeroDetectado');
+    const correoConectado = document.getElementById('correoConectado');
+
+    async function actualizarEstado() {
+      try {
+        const res = await fetch('/api/estado');
+        const estado = await res.json();
+
+        if (!estado.whatsappListo) {
+          // Seguimos en el paso del QR
+          pasoQr.style.display = 'block';
+          pasoGoogle.style.display = 'none';
+          pasoListo.style.display = 'none';
+
+          if (estado.qrDataUrl) {
+            qrCargando.style.display = 'none';
+            qrImg.style.display = 'inline-block';
+            qrImg.src = estado.qrDataUrl;
+          }
+          return;
+        }
+
+        // WhatsApp ya conectado
+        if (estado.calendarConectado) {
+          pasoQr.style.display = 'none';
+          pasoGoogle.style.display = 'none';
+          pasoListo.style.display = 'block';
+          correoConectado.textContent = estado.correoCalendario || '';
+        } else {
+          pasoQr.style.display = 'none';
+          pasoGoogle.style.display = 'block';
+          pasoListo.style.display = 'none';
+          numeroDetectado.textContent = estado.telefonoBot || '';
+          btnConectar.href = `/auth/google?telefono_bot=${encodeURIComponent(estado.telefonoBot)}`;
+        }
+      } catch (err) {
+        console.error('Error consultando estado:', err);
+      }
+    }
+
+    actualizarEstado();
+    setInterval(actualizarEstado, 2000);
+  </script>
+</body>
+</html>

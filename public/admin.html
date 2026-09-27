@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel de Administración - Sistema de Citas</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <!-- Header -->
+        <div class="mb-8">
+            <h1 class="text-3xl font-bold text-amber-500 mb-2">
+                <i class="fas fa-cogs mr-2"></i>Panel de Administración
+            </h1>
+            <p class="text-gray-400">Configura tu negocio y servicios</p>
+        </div>
+
+        <!-- Paso 1: Ingresar teléfono del bot -->
+        <div id="pasoTelefono" class="mb-8">
+            <div class="bg-gray-800 rounded-lg p-6">
+                <h2 class="text-xl font-semibold mb-4 text-amber-400">
+                    <i class="fas fa-mobile-alt mr-2"></i>Paso 1: Ingresa tu número de WhatsApp del bot
+                </h2>
+                <div class="flex gap-4">
+                    <input 
+                        type="text" 
+                        id="telefonoBot" 
+                        placeholder="Ej: 573001234567"
+                        class="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-amber-500"
+                    >
+                    <button 
+                        onclick="cargarEmpresa()"
+                        class="bg-amber-500 hover:bg-amber-600 text-gray-900 font-semibold px-6 py-3 rounded-lg transition-colors"
+                    >
+                        <i class="fas fa-search mr-2"></i>Buscar
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Paso 2: Configurar empresa -->
+        <div id="pasoEmpresa" class="mb-8 hidden">
+            <div class="bg-gray-800 rounded-lg p-6">
+                <h2 class="text-xl font-semibold mb-4 text-amber-400">
+                    <i class="fas fa-building mr-2"></i>Paso 2: Configura tu empresa
+                </h2>
+                
+                <div id="empresaExistente" class="hidden mb-4 p-4 bg-green-900/30 border border-green-700 rounded-lg">
+                    <p class="text-green-400">
+                        <i class="fas fa-check-circle mr-2"></i>
+                        Empresa encontrada: <span id="nombreEmpresa" class="font-semibold"></span>
+                    </p>
+                </div>
+
+                <div id="empresaNoEncontrada" class="hidden mb-4 p-4 bg-yellow-900/30 border border-yellow-700 rounded-lg">
+                    <p class="text-yellow-400">
+                        <i class="fas fa-exclamation-triangle mr-2"></i>
+                        No se encontró una empresa para este número. Crea una nueva:
+                    </p>
+                </div>
+
+                <form id="formEmpresa" class="space-y-4">
+                    <input type="hidden" id="empresaId">
+                    
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Nombre de la empresa *</label>
+                        <input 
+                            type="text" 
+                            id="nombreEmpresaInput"
+                            class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-amber-500"
+                            placeholder="Ej: Xheros Barber"
+                        >
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Descripción</label>
+                        <textarea 
+                            id="descripcionEmpresa"
+                            rows="3"
+                            class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-amber-500"
+                            placeholder="Descripción breve de tu negocio"
+                        ></textarea>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium mb-2">Teléfono</label>
+                            <input 
+                                type="text" 
+                                id="telefonoEmpresa"
+                                class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-amber-500"
+                                placeholder="Ej: 573001234567"
+                            >
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-2">Zona horaria</label>
+                            <select 
+                                id="zonaHoraria"
+                                class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-amber-500"
+                            >
+                                <option value="America/Bogota">America/Bogota (Colombia)</option>
+                                <option value="America/Mexico_City">America/Mexico_City (México)</option>
+                                <option value="America/Argentina/Buenos_Aires">America/Argentina/Buenos_Aires (Argentina)</option>
+                                <option value="America/Lima">America/Lima (Perú)</option>
+                                <option value="America/Santiago">America/Santiago (Chile)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Dirección</label>
+                        <input 
+                            type="text" 
+                            id="direccionEmpresa"
+                            class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-amber-500"
+                            placeholder="Ej: Calle 123 #45-67"
+                        >
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Mensaje de bienvenida</label>
+                        <textarea 
+                            id="mensajeBienvenida"
+                            rows="2"
+                            class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-amber-500"
+                            placeholder="Mensaje que el bot envía al saludar"
+                        ></textarea>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Mensaje de confirmación de cita</label>
+                        <textarea 
+                            id="mensajeConfirmacion"
+                            rows="2"
+                            class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-amber-500"
+                            placeholder="Variables disponibles: {nombre}, {servicio}, {fecha}, {hora}, {nombre_negocio}"
+                        ></textarea>
+                    </div>
+
+                    <button 
+                        type="submit"
+                        class="w-full bg-amber-500 hover:bg-amber-600 text-gray-900 font-semibold px-6 py-3 rounded-lg transition-colors"
+                    >
+                        <i class="fas fa-save mr-2"></i>Guardar Empresa
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Paso 3: Servicios -->
+        <div id="pasoServicios" class="mb-8 hidden">
+            <div class="bg-gray-800 rounded-lg p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold text-amber-400">
+                        <i class="fas fa-concierge-bell mr-2"></i>Paso 3: Servicios
+                    </h2>
+                    <button 
+                        onclick="mostrarFormServicio()"
+                        class="bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors"
+                    >
+                        <i class="fas fa-plus mr-2"></i>Agregar Servicio
+                    </button>
+                </div>
+
+                <!-- Formulario de servicio (oculto por defecto) -->
+                <div id="formServicio" class="hidden mb-6 p-4 bg-gray-700 rounded-lg">
+                    <h3 class="text-lg font-semibold mb-4">Nuevo Servicio</h3>
+                    <form id="formServicioData" class="space-y-4">
+                        <input type="hidden" id="servicioId">
+                        
+                        <div>
+                            <label class="block text-sm font-medium mb-2">Nombre del servicio *</label>
+                            <input 
+                                type="text" 
+                                id="nombreServicio"
+                                class="w-full bg-gray-600 border border-gray-500 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-amber-500"
+                                placeholder="Ej: Corte de cabello"
+                            >
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium mb-2">Descripción</label>
+                            <textarea 
+                                id="descripcionServicio"
+                                rows="2"
+                                class="w-full bg-gray-600 border border-gray-500 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-amber-500"
+                                placeholder="Descripción del servicio"
+                            ></textarea>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium mb-2">Precio (COP) *</label>
+                                <input 
+                                    type="number" 
+                                    id="precioServicio"
+                                    class="w-full bg-gray-600 border border-gray-500 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-amber-500"
+                                    placeholder="Ej: 45000"
+                                >
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-2">Duración (minutos)</label>
+                                <input 
+                                    type="number" 
+                                    id="duracionServicio"
+                                    value="60"
+                                    class="w-full bg-gray-600 border border-gray-500 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-amber-500"
+                                >
+                            </div>
+                        </div>
+
+                        <div class="flex gap-4">
+                            <button 
+                                type="submit"
+                                class="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-3 rounded-lg transition-colors"
+                            >
+                                <i class="fas fa-save mr-2"></i>Guardar Servicio
+                            </button>
+                            <button 
+                                type="button"
+                                onclick="ocultarFormServicio()"
+                                class="flex-1 bg-gray-600 hover:bg-gray-700 text-white font-semibold px-6 py-3 rounded-lg transition-colors"
+                            >
+                                <i class="fas fa-times mr-2"></i>Cancelar
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Lista de servicios -->
+                <div id="listaServicios" class="space-y-3">
+                    <p class="text-gray-400 text-center py-8">Cargando servicios...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mensaje de éxito -->
+        <div id="mensajeExito" class="hidden mb-8 p-4 bg-green-900/30 border border-green-700 rounded-lg">
+            <p class="text-green-400 text-center">
+                <i class="fas fa-check-circle mr-2"></i>
+                <span id="textoExito"></span>
+            </p>
+        </div>
+    </div>
+
+    <script>
+        let empresaActual = null;
+        let telefonoBotActual = null;
+
+        async function cargarEmpresa() {
+            const telefono = document.getElementById('telefonoBot').value.trim();
+            if (!telefono) {
+                alert('Por favor ingresa el número de teléfono');
+                return;
+            }
+
+            telefonoBotActual = telefono;
+
+            try {
+                const res = await fetch(`/api/admin/empresas/telefono/${telefono}`);
+                const data = await res.json();
+
+                if (res.ok && data.id) {
+                    empresaActual = data;
+                    mostrarEmpresaExistente(data);
+                } else {
+                    empresaActual = null;
+                    mostrarEmpresaNoEncontrada();
+                }
+
+                document.getElementById('pasoEmpresa').classList.remove('hidden');
+                document.getElementById('pasoServicios').classList.remove('hidden');
+
+                if (empresaActual) {
+                    cargarServicios(empresaActual.id);
+                }
+            } catch (error) {
+                console.error('Error cargando empresa:', error);
+                alert('Error al cargar la empresa');
+            }
+        }
+
+        function mostrarEmpresaExistente(empresa) {
+            document.getElementById('empresaExistente').classList.remove('hidden');
+            document.getElementById('empresaNoEncontrada').classList.add('hidden');
+            document.getElementById('nombreEmpresa').textContent = empresa.nombre;
+
+            // Llenar formulario
+            document.getElementById('empresaId').value = empresa.id;
+            document.getElementById('nombreEmpresaInput').value = empresa.nombre || '';
+            document.getElementById('descripcionEmpresa').value = empresa.descripcion || '';
+            document.getElementById('telefonoEmpresa').value = empresa.telefono || '';
+            document.getElementById('zonaHoraria').value = empresa.zona_horaria || 'America/Bogota';
+            document.getElementById('direccionEmpresa').value = empresa.direccion || '';
+            document.getElementById('mensajeBienvenida').value = empresa.mensaje_bienvenida || '';
+            document.getElementById('mensajeConfirmacion').value = empresa.mensaje_confirmacion || '';
+        }
+
+        function mostrarEmpresaNoEncontrada() {
+            document.getElementById('empresaExistente').classList.add('hidden');
+            document.getElementById('empresaNoEncontrada').classList.remove('hidden');
+
+            // Limpiar formulario
+            document.getElementById('empresaId').value = '';
+            document.getElementById('nombreEmpresaInput').value = '';
+            document.getElementById('descripcionEmpresa').value = '';
+            document.getElementById('telefonoEmpresa').value = '';
+            document.getElementById('zonaHoraria').value = 'America/Bogota';
+            document.getElementById('direccionEmpresa').value = '';
+            document.getElementById('mensajeBienvenida').value = '';
+            document.getElementById('mensajeConfirmacion').value = '';
+        }
+
+        document.getElementById('formEmpresa').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const empresaData = {
+                nombre: document.getElementById('nombreEmpresaInput').value,
+                descripcion: document.getElementById('descripcionEmpresa').value,
+                telefono: document.getElementById('telefonoEmpresa').value,
+                zona_horaria: document.getElementById('zonaHoraria').value,
+                direccion: document.getElementById('direccionEmpresa').value,
+                mensaje_bienvenida: document.getElementById('mensajeBienvenida').value,
+                mensaje_confirmacion: document.getElementById('mensajeConfirmacion').value
+            };
+
+            try {
+                let res;
+                if (empresaActual && empresaActual.id) {
+                    // Actualizar
+                    res = await fetch(`/api/admin/empresas/${empresaActual.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(empresaData)
+                    });
+                } else {
+                    // Crear
+                    res = await fetch('/api/admin/empresas', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(empresaData)
+                    });
+                }
+
+                const data = await res.json();
+
+                if (res.ok) {
+                    empresaActual = data;
+                    mostrarEmpresaExistente(data);
+                    
+                    // Asignar empresa al barbero
+                    await fetch('/api/admin/empresas/assign', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            telefono_bot: telefonoBotActual,
+                            empresa_id: data.id,
+                            nombre_barbero: data.nombre
+                        })
+                    });
+
+                    mostrarMensaje('Empresa guardada correctamente');
+                    cargarServicios(data.id);
+                } else {
+                    alert('Error al guardar la empresa: ' + (data.error || 'Error desconocido'));
+                }
+            } catch (error) {
+                console.error('Error guardando empresa:', error);
+                alert('Error al guardar la empresa');
+            }
+        });
+
+        async function cargarServicios(empresaId) {
+            try {
+                const res = await fetch(`/api/admin/servicios/empresa/${empresaId}`);
+                const servicios = await res.json();
+
+                const lista = document.getElementById('listaServicios');
+                
+                if (servicios.length === 0) {
+                    lista.innerHTML = '<p class="text-gray-400 text-center py-8">No hay servicios configurados. Agrega el primero.</p>';
+                    return;
+                }
+
+                lista.innerHTML = servicios.map(s => `
+                    <div class="bg-gray-700 rounded-lg p-4 flex justify-between items-center">
+                        <div>
+                            <h4 class="font-semibold text-white">${s.nombre}</h4>
+                            <p class="text-gray-400 text-sm">${s.descripcion || 'Sin descripción'}</p>
+                            <p class="text-amber-400 font-semibold">$${s.precio.toLocaleString()} COP • ${s.duracion_minutos} min</p>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="editarServicio('${s.id}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg transition-colors">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button onclick="eliminarServicio('${s.id}')" class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg transition-colors">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Error cargando servicios:', error);
+            }
+        }
+
+        function mostrarFormServicio() {
+            document.getElementById('formServicio').classList.remove('hidden');
+            document.getElementById('servicioId').value = '';
+            document.getElementById('nombreServicio').value = '';
+            document.getElementById('descripcionServicio').value = '';
+            document.getElementById('precioServicio').value = '';
+            document.getElementById('duracionServicio').value = '60';
+        }
+
+        function ocultarFormServicio() {
+            document.getElementById('formServicio').classList.add('hidden');
+        }
+
+        document.getElementById('formServicioData').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const servicioData = {
+                empresa_id: empresaActual.id,
+                nombre: document.getElementById('nombreServicio').value,
+                descripcion: document.getElementById('descripcionServicio').value,
+                precio: parseInt(document.getElementById('precioServicio').value),
+                duracion_minutos: parseInt(document.getElementById('duracionServicio').value)
+            };
+
+            const servicioId = document.getElementById('servicioId').value;
+
+            try {
+                let res;
+                if (servicioId) {
+                    res = await fetch(`/api/admin/servicios/${servicioId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(servicioData)
+                    });
+                } else {
+                    res = await fetch('/api/admin/servicios', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(servicioData)
+                    });
+                }
+
+                if (res.ok) {
+                    ocultarFormServicio();
+                    cargarServicios(empresaActual.id);
+                    mostrarMensaje('Servicio guardado correctamente');
+                } else {
+                    alert('Error al guardar el servicio');
+                }
+            } catch (error) {
+                console.error('Error guardando servicio:', error);
+                alert('Error al guardar el servicio');
+            }
+        });
+
+        async function editarServicio(id) {
+            try {
+                const res = await fetch(`/api/admin/servicios/empresa/${empresaActual.id}`);
+                const servicios = await res.json();
+                const servicio = servicios.find(s => s.id === id);
+
+                if (servicio) {
+                    document.getElementById('formServicio').classList.remove('hidden');
+                    document.getElementById('servicioId').value = servicio.id;
+                    document.getElementById('nombreServicio').value = servicio.nombre;
+                    document.getElementById('descripcionServicio').value = servicio.descripcion || '';
+                    document.getElementById('precioServicio').value = servicio.precio;
+                    document.getElementById('duracionServicio').value = servicio.duracion_minutos;
+                }
+            } catch (error) {
+                console.error('Error cargando servicio:', error);
+            }
+        }
+
+        async function eliminarServicio(id) {
+            if (!confirm('¿Estás seguro de eliminar este servicio?')) return;
+
+            try {
+                const res = await fetch(`/api/admin/servicios/${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (res.ok) {
+                    cargarServicios(empresaActual.id);
+                    mostrarMensaje('Servicio eliminado correctamente');
+                } else {
+                    alert('Error al eliminar el servicio');
+                }
+            } catch (error) {
+                console.error('Error eliminando servicio:', error);
+                alert('Error al eliminar el servicio');
+            }
+        }
+
+        function mostrarMensaje(texto) {
+            const mensaje = document.getElementById('mensajeExito');
+            document.getElementById('textoExito').textContent = texto;
+            mensaje.classList.remove('hidden');
+            setTimeout(() => mensaje.classList.add('hidden'), 3000);
+        }
+    </script>
+</body>
+</html>
