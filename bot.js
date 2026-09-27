@@ -7,6 +7,9 @@ const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 
+// Configurar cache de Puppeteer para Render
+process.env.PUPPETEER_CACHE_DIR = process.env.PUPPETEER_CACHE_DIR || '/opt/render/.cache/puppeteer';
+
 const { verificarYAgendarCita, cancelarCita, modificarCita, trabajadorEstaConectado } = require('./calendar');
 const { guardarCliente, registrarCitaAgendada, registrarCitaCancelada, registrarCitaModificada } = require('./clientes');
 const botState = require('./botState');
