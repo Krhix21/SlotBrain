@@ -15,7 +15,7 @@ function crearOAuthClient() {
 }
 
 function setupAuthRoutes(app) {
-    // Paso A: el barbero llega aquí (desde el botón de la página de vinculación)
+    // Paso A: el trabajador llega aquí (desde el botón de la página de vinculación)
     app.get('/auth/google', (req, res) => {
         const { telefono_bot } = req.query;
         if (!telefono_bot) {
@@ -52,11 +52,11 @@ function setupAuthRoutes(app) {
             const { tokens } = await oauth2Client.getToken(code);
 
             if (!tokens.refresh_token) {
-                // Pasa cuando el barbero ya había autorizado antes y Google no reenvía el refresh_token
+                // Pasa cuando el trabajador ya había autorizado antes y Google no reenvía el refresh_token
                 return res.status(400).send(paginaResultado(
                     false,
                     'No se pudo completar la conexión porque ya habías autorizado esta app antes. ' +
-                    'Ve a https://myaccount.google.com/permissions, quita el acceso de "Xheros Barber" y vuelve a intentarlo.'
+                    'Ve a https://myaccount.google.com/permissions, quita el acceso de esta app y vuelve a intentarlo.'
                 ));
             }
 
@@ -70,7 +70,7 @@ function setupAuthRoutes(app) {
             const correoUsuario = calendarioPrincipal.id;
 
             const { error: dbError } = await supabase
-                .from('barberos')
+                .from('trabajadores')
                 .upsert(
                     {
                         telefono_bot,
@@ -86,9 +86,9 @@ function setupAuthRoutes(app) {
                 return res.status(500).send(paginaResultado(false, 'Hubo un error guardando tu conexión. Intenta de nuevo.'));
             }
 
-            console.log(`✅ Barbero conectado: ${telefono_bot} -> ${correoUsuario}`);
+            console.log(`✅ Trabajador conectado: ${telefono_bot} -> ${correoUsuario}`);
             botState.setCalendarConectado(true, correoUsuario);
-            res.send(paginaResultado(true, `Tu calendario (${correoUsuario}) ya está conectado con Xheros Barber.`));
+            res.send(paginaResultado(true, `Tu calendario (${correoUsuario}) ya está conectado.`));
         } catch (err) {
             console.error('❌ Error en callback de Google:', err);
             res.status(500).send(paginaResultado(false, 'Hubo un error conectando tu cuenta. Intenta de nuevo.'));

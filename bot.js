@@ -7,15 +7,15 @@ const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 
-const { verificarYAgendarCita, cancelarCita, modificarCita, barberoEstaConectado } = require('./calendar');
+const { verificarYAgendarCita, cancelarCita, modificarCita, trabajadorEstaConectado } = require('./calendar');
 const { guardarCliente, registrarCitaAgendada, registrarCitaCancelada, registrarCitaModificada } = require('./clientes');
 const botState = require('./botState');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 // ============================================================
-// MVP de un solo barbero por instancia del bot:
-// Cada barbero corre su propia instancia de este bot (su propio
+// MVP de un solo trabajador por instancia del bot:
+// Cada trabajador corre su propia instancia de este bot (su propio
 // WhatsApp). Ya NO se pide el número por .env: se detecta solo
 // apenas se escanea el QR y whatsapp-web.js se conecta
 // (client.info.wid.user). Ese número es el que se usa como
@@ -44,15 +44,15 @@ async function cargarConfiguracionEmpresa(telefono_bot) {
             };
         }
 
-        // Obtener barbero con su empresa
-        const { data: barbero, error: barberoError } = await supabase
-            .from('barberos')
+        // Obtener trabajador con su empresa
+        const { data: trabajador, error: trabajadorError } = await supabase
+            .from('trabajadores')
             .select('empresa_id')
             .eq('telefono_bot', telefono_bot)
             .single();
 
-        if (barberoError || !barbero || !barbero.empresa_id) {
-            console.log(`⚠️  No se encontró empresa para el barbero ${telefono_bot}`);
+        if (trabajadorError || !trabajador || !trabajador.empresa_id) {
+            console.log(`⚠️  No se encontró empresa para el trabajador ${telefono_bot}`);
             return null;
         }
 
@@ -60,11 +60,11 @@ async function cargarConfiguracionEmpresa(telefono_bot) {
         const { data: empresa, error: empresaError } = await supabase
             .from('empresas')
             .select('*')
-            .eq('id', barbero.empresa_id)
+            .eq('id', trabajador.empresa_id)
             .single();
 
         if (empresaError || !empresa) {
-            console.log(`⚠️  No se encontró la empresa ${barbero.empresa_id}`);
+            console.log(`⚠️  No se encontró la empresa ${trabajador.empresa_id}`);
             return null;
         }
 
@@ -72,7 +72,7 @@ async function cargarConfiguracionEmpresa(telefono_bot) {
         const { data: servicios, error: serviciosError } = await supabase
             .from('servicios')
             .select('*')
-            .eq('empresa_id', barbero.empresa_id)
+            .eq('empresa_id', trabajador.empresa_id)
             .eq('activo', true);
 
         if (serviciosError) {
@@ -683,7 +683,7 @@ client.on('ready', async () => {
         console.warn(`   Ve a /admin.html para configurar tu negocio.`);
     }
 
-    const conectado = await barberoEstaConectado(TELEFONO_BOT);
+    const conectado = await trabajadorEstaConectado(TELEFONO_BOT);
     if (!conectado) {
         botState.setCalendarConectado(false);
         console.warn(`⚠️  ATENCIÓN: este número (${TELEFONO_BOT}) todavía NO ha conectado su Google Calendar.`);

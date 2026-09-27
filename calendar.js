@@ -7,16 +7,16 @@ const ZONA_HORARIA_DEFAULT = 'America/Bogota';
 const OFFSET_DEFAULT = '-05:00';
 const DURACION_DEFAULT_MS = 60 * 60 * 1000; // 60 min
 
-async function getCalendarClientForBarbero(telefono_bot) {
+async function getCalendarClientForTrabajador(telefono_bot) {
     const { data, error } = await supabase
-        .from('barberos')
+        .from('trabajadores')
         .select('refresh_token, correo, empresa_id')
         .eq('telefono_bot', telefono_bot)
         .eq('activo', true)
         .single();
 
     if (error || !data) {
-        console.error('❌ No se encontró barbero conectado:', telefono_bot, error?.message);
+        console.error('❌ No se encontró trabajador conectado:', telefono_bot, error?.message);
         return null;
     }
 
@@ -54,7 +54,7 @@ async function getCalendarClientForBarbero(telefono_bot) {
 async function consultarDisponibilidad(args, telefono_bot) {
     console.log('==> [consultar_disponibilidad] Args recibidos:', args, '| telefono_bot:', telefono_bot);
 
-    const clientData = await getCalendarClientForBarbero(telefono_bot);
+    const clientData = await getCalendarClientForTrabajador(telefono_bot);
     if (!clientData) {
         return { exitoso: false, mensaje: 'Este negocio todavía no ha conectado su calendario.' };
     }
@@ -97,7 +97,7 @@ async function consultarDisponibilidad(args, telefono_bot) {
 async function verificarYAgendarCita(args, telefono_bot) {
     console.log('==> [agendar_cita] Args recibidos:', args, '| telefono_bot:', telefono_bot);
 
-    const clientData = await getCalendarClientForBarbero(telefono_bot);
+    const clientData = await getCalendarClientForTrabajador(telefono_bot);
     if (!clientData) {
         return { exitoso: false, mensaje: 'Este negocio todavía no ha conectado su calendario. Debe hacerlo desde el panel.' };
     }
@@ -163,7 +163,7 @@ async function verificarYAgendarCita(args, telefono_bot) {
             try {
                 await supabase.from('citas').insert({
                     empresa_id: empresaConfig.id,
-                    barbero_id: (await supabase.from('barberos').select('id').eq('telefono_bot', telefono_bot).single()).data?.id,
+                    trabajador_id: (await supabase.from('trabajadores').select('id').eq('telefono_bot', telefono_bot).single()).data?.id,
                     nombre_cliente: args.nombre_cliente,
                     servicio_id: null, // TODO: obtener ID del servicio
                     nombre_servicio: args.servicio,
@@ -191,7 +191,7 @@ async function verificarYAgendarCita(args, telefono_bot) {
 }
 
 async function cancelarCita(args, telefono_bot) {
-    const clientData = await getCalendarClientForBarbero(telefono_bot);
+    const clientData = await getCalendarClientForTrabajador(telefono_bot);
     if (!clientData) {
         return { exitoso: false, mensaje: 'Este negocio todavía no ha conectado su calendario.' };
     }
@@ -239,7 +239,7 @@ async function cancelarCita(args, telefono_bot) {
 }
 
 async function modificarCita(args, telefono_bot) {
-    const clientData = await getCalendarClientForBarbero(telefono_bot);
+    const clientData = await getCalendarClientForTrabajador(telefono_bot);
     if (!clientData) {
         return { exitoso: false, mensaje: 'Este negocio todavía no ha conectado su calendario.' };
     }
@@ -310,10 +310,10 @@ async function modificarCita(args, telefono_bot) {
     }
 }
 
-// Útil para el panel/admin: saber si un barbero ya conectó su calendario
-async function barberoEstaConectado(telefono_bot) {
+// Útil para el panel/admin: saber si un trabajador ya conectó su calendario
+async function trabajadorEstaConectado(telefono_bot) {
     const { data } = await supabase
-        .from('barberos')
+        .from('trabajadores')
         .select('correo, empresa_id')
         .eq('telefono_bot', telefono_bot)
         .eq('activo', true)
@@ -321,4 +321,4 @@ async function barberoEstaConectado(telefono_bot) {
     return data || null;
 }
 
-module.exports = { verificarYAgendarCita, cancelarCita, modificarCita, consultarDisponibilidad, barberoEstaConectado };
+module.exports = { verificarYAgendarCita, cancelarCita, modificarCita, consultarDisponibilidad, trabajadorEstaConectado };

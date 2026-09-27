@@ -8,14 +8,14 @@ Bot de WhatsApp para gestión de citas con Google Calendar, ahora **multiservici
 - ✅ **Multicuenta**: Múltiples empresas pueden usar el mismo sistema
 - ✅ **Servicios dinámicos**: Agrega/edita/elimina servicios desde el panel de administración
 - ✅ **Mensajes personalizados**: Personaliza bienvenida y confirmación por empresa
-- ✅ **Integración Google Calendar**: Cada barbero conecta su propio calendario
+- ✅ **Integración Google Calendar**: Cada trabajador conecta su propio calendario
 - ✅ **Historial de citas**: Registro completo en base de datos
 
 ## Arquitectura
 
 - **Empresas**: Cada negocio tiene su configuración independiente
 - **Servicios**: Cada empresa define sus propios servicios con precios y duraciones
-- **Barberos**: Se relacionan con empresas y conectan sus Google Calendars
+- **Trabajadores**: Se relacionan con empresas y conectan sus Google Calendars
 - **Citas**: Se registran en la base de datos y se sincronizan con Google Calendar
 
 ## 1. Instalar dependencias
@@ -30,7 +30,7 @@ Ejecuta el contenido de `supabase-schema.sql` en el SQL Editor de tu proyecto Su
 Tablas creadas:
 - `empresas` — configuración de cada negocio
 - `servicios` — servicios de cada empresa (nombre, precio, duración)
-- `barberos` — credenciales OAuth de Google Calendar (ahora con relación a empresas)
+- `trabajadores` — credenciales OAuth de Google Calendar (ahora con relación a empresas)
 - `citas` — historial completo de citas
 
 ## 3. Configurar `.env`
@@ -47,7 +47,7 @@ SUPABASE_KEY=tu_anon_key_de_supabase
 PORT=3000
 ```
 
-**Nota:** El número de teléfono ya NO se configura manualmente — se detecta automáticamente cuando el barbero escanea el QR.
+**Nota:** El número de teléfono ya NO se configura manualmente — se detecta automáticamente cuando el trabajador escanea el QR.
 
 ## 4. Arrancar el servidor
 ```bash
@@ -104,7 +104,7 @@ Resumen rápido:
 
 Mientras tu app esté en modo "Testing":
 1. Ve a Google Cloud Console → APIs y servicios → Pantalla de consentimiento OAuth
-2. En "Usuarios de prueba", agrega el correo de cada barbero
+2. En "Usuarios de prueba", agrega el correo de cada trabajador
 3. Sin esto, Google bloqueará el login
 
 **Para producción:** Verifica la app con Google para que cualquier usuario pueda conectar su calendario sin necesidad de agregarlos manualmente.
@@ -115,7 +115,7 @@ Mientras tu app esté en modo "Testing":
 - `GET /api/admin/empresas/telefono/:telefono_bot` - Obtener empresa por teléfono
 - `POST /api/admin/empresas` - Crear empresa
 - `PUT /api/admin/empresas/:id` - Actualizar empresa
-- `POST /api/admin/empresas/assign` - Asignar empresa a barbero
+- `POST /api/admin/empresas/assign` - Asignar empresa a trabajador
 
 ### Servicios
 - `GET /api/admin/servicios/empresa/:empresa_id` - Obtener servicios de empresa
@@ -140,8 +140,8 @@ Cada servicio puede tener una duración diferente. El bot usa esta duración par
 En producción, configura un disco persistente para que la sesión de WhatsApp no se pierda al reiniciar el servidor.
 
 ### Escalabilidad
-- **Actualmente:** 1 instancia = 1 WhatsApp = 1 barbero
-- **Para múltiples barberos:** Cada uno necesita su propia instancia del bot
+- **Actualmente:** 1 instancia = 1 WhatsApp = 1 trabajador
+- **Para múltiples trabajadores:** Cada uno necesita su propia instancia del bot
 - **Alternativa:** Migrar a WhatsApp Business API (Meta) para soporte multi-número desde un solo backend
 
 ## Archivos Principales

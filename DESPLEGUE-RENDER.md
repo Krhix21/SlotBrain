@@ -85,7 +85,7 @@ git push -u origin main
 
 1. En **OAuth consent screen**
 2. Ve a la sección **Usuarios de prueba**
-3. Agrega los correos de los barberos que probarán el sistema
+3. Agrega los correos de los trabajadores que probarán el sistema
 
 ## Paso 4: Crear Web Service en Render
 

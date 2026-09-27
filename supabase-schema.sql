@@ -30,18 +30,24 @@ CREATE TABLE IF NOT EXISTS servicios (
     actualizado_en TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Modificar tabla barberos existente para relacionar con empresas
-ALTER TABLE barberos 
-ADD COLUMN IF NOT EXISTS empresa_id UUID REFERENCES empresas(id) ON DELETE SET NULL,
-ADD COLUMN IF NOT EXISTS nombre TEXT,
-ADD COLUMN IF NOT EXISTS creado_en TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-ADD COLUMN IF NOT EXISTS actualizado_en TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+-- Tabla de trabajadores (profesionales independientes)
+CREATE TABLE IF NOT EXISTS trabajadores (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    telefono_bot TEXT NOT NULL UNIQUE,
+    correo TEXT,
+    refresh_token TEXT,
+    empresa_id UUID REFERENCES empresas(id) ON DELETE SET NULL,
+    nombre TEXT,
+    activo BOOLEAN DEFAULT true,
+    creado_en TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    actualizado_en TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
 -- Tabla de citas (historial)
 CREATE TABLE IF NOT EXISTS citas (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     empresa_id UUID REFERENCES empresas(id) ON DELETE CASCADE,
-    barbero_id UUID REFERENCES barberos(id) ON DELETE SET NULL,
+    trabajador_id UUID REFERENCES trabajadores(id) ON DELETE SET NULL,
     nombre_cliente TEXT NOT NULL,
     telefono_cliente TEXT,
     servicio_id UUID REFERENCES servicios(id) ON DELETE SET NULL,
@@ -57,9 +63,10 @@ CREATE TABLE IF NOT EXISTS citas (
 
 -- Índices para mejorar rendimiento
 CREATE INDEX IF NOT EXISTS idx_servicios_empresa ON servicios(empresa_id);
-CREATE INDEX IF NOT EXISTS idx_barberos_empresa ON barberos(empresa_id);
+CREATE INDEX IF NOT EXISTS idx_trabajadores_empresa ON trabajadores(empresa_id);
+CREATE INDEX IF NOT EXISTS idx_trabajadores_telefono ON trabajadores(telefono_bot);
 CREATE INDEX IF NOT EXISTS idx_citas_empresa ON citas(empresa_id);
-CREATE INDEX IF NOT EXISTS idx_citas_barbero ON citas(barbero_id);
+CREATE INDEX IF NOT EXISTS idx_citas_trabajador ON citas(trabajador_id);
 CREATE INDEX IF NOT EXISTS idx_citas_fecha ON citas(fecha, hora);
 CREATE INDEX IF NOT EXISTS idx_citas_estado ON citas(estado);
 
@@ -82,8 +89,8 @@ BEFORE UPDATE ON servicios
 FOR EACH ROW
 EXECUTE FUNCTION actualizar_timestamp();
 
-CREATE TRIGGER trigger_barberos_actualizado
-BEFORE UPDATE ON barberos
+CREATE TRIGGER trigger_trabajadores_actualizado
+BEFORE UPDATE ON trabajadores
 FOR EACH ROW
 EXECUTE FUNCTION actualizar_timestamp();
 

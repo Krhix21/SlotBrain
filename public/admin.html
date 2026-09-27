@@ -350,14 +350,14 @@
                     empresaActual = data;
                     mostrarEmpresaExistente(data);
                     
-                    // Asignar empresa al barbero
+                    // Asignar empresa al trabajador
                     await fetch('/api/admin/empresas/assign', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             telefono_bot: telefonoBotActual,
                             empresa_id: data.id,
-                            nombre_barbero: data.nombre
+                            nombre_trabajador: data.nombre
                         })
                     });
 

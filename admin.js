@@ -21,31 +21,31 @@ async function getEmpresaByTelefonoBot(req, res) {
     try {
         const { telefono_bot } = req.params;
         
-        const { data: barbero, error: barberoError } = await supabase
-            .from('barberos')
+        const { data: trabajador, error: trabajadorError } = await supabase
+            .from('trabajadores')
             .select('empresa_id, nombre')
             .eq('telefono_bot', telefono_bot)
             .single();
 
-        if (barberoError || !barbero) {
-            return res.status(404).json({ error: 'Barbero no encontrado' });
+        if (trabajadorError || !trabajador) {
+            return res.status(404).json({ error: 'Trabajador no encontrado' });
         }
 
-        if (!barbero.empresa_id) {
-            return res.status(404).json({ error: 'El barbero no tiene una empresa asignada' });
+        if (!trabajador.empresa_id) {
+            return res.status(404).json({ error: 'El trabajador no tiene una empresa asignada' });
         }
 
         const { data: empresa, error: empresaError } = await supabase
             .from('empresas')
             .select('*')
-            .eq('id', barbero.empresa_id)
+            .eq('id', trabajador.empresa_id)
             .single();
 
         if (empresaError || !empresa) {
             return res.status(404).json({ error: 'Empresa no encontrada' });
         }
 
-        res.json({ ...empresa, nombre_barbero: barbero.nombre });
+        res.json({ ...empresa, nombre_trabajador: trabajador.nombre });
     } catch (error) {
         console.error('Error obteniendo empresa:', error);
         res.status(500).json({ error: 'Error interno del servidor' });
@@ -116,20 +116,20 @@ async function updateEmpresa(req, res) {
     }
 }
 
-// Asignar empresa a un barbero
-async function assignEmpresaToBarbero(req, res) {
+// Asignar empresa a un trabajador
+async function assignEmpresaToTrabajador(req, res) {
     try {
-        const { telefono_bot, empresa_id, nombre_barbero } = req.body;
+        const { telefono_bot, empresa_id, nombre_trabajador } = req.body;
 
         if (!telefono_bot || !empresa_id) {
             return res.status(400).json({ error: 'telefono_bot y empresa_id son requeridos' });
         }
 
         const { data, error } = await supabase
-            .from('barberos')
+            .from('trabajadores')
             .update({ 
                 empresa_id, 
-                nombre: nombre_barbero 
+                nombre: nombre_trabajador 
             })
             .eq('telefono_bot', telefono_bot)
             .select()
@@ -371,7 +371,7 @@ function setupAdminRoutes(app) {
     app.get('/api/admin/empresas/telefono/:telefono_bot', getEmpresaByTelefonoBot);
     app.post('/api/admin/empresas', createEmpresa);
     app.put('/api/admin/empresas/:id', updateEmpresa);
-    app.post('/api/admin/empresas/assign', assignEmpresaToBarbero);
+    app.post('/api/admin/empresas/assign', assignEmpresaToTrabajador);
 
     // Rutas de servicios
     app.get('/api/admin/servicios/empresa/:empresa_id', getServiciosByEmpresa);
