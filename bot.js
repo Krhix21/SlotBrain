@@ -6,6 +6,7 @@ const qrcode = require('qrcode'); // genera el QR como imagen para la web
 const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
+const puppeteer = require('puppeteer');
 
 // Configurar cache de Puppeteer para Render
 process.env.PUPPETEER_CACHE_DIR = process.env.PUPPETEER_CACHE_DIR || '/opt/render/.cache/puppeteer';
@@ -643,8 +644,7 @@ const client = new Client({
     authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
     puppeteer: {
         headless: true,
-        // Usar Chrome instalado por puppeteer (si está disponible) o dejar que puppeteer lo maneje
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(),
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -654,7 +654,7 @@ const client = new Client({
             '--no-zygote',
             '--disable-gpu',
             '--disable-software-rasterizer',
-            '--single-process' // Importante para Render
+            '--single-process'
         ]
     }
 });
