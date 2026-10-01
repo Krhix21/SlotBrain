@@ -85,12 +85,12 @@ async function yaProcesado(messageId, botTelefono) {
         .from('mensajes_webhook')
         .insert({ message_id: messageId, telefono_bot: botTelefono });
 
-    if (!error) {
-        // El registro ya existía: es un reintento de Meta.
-        return true;
-    }
+    // El INSERT hace de reserva: si entró, es la primera entrega de este
+    // mensaje, así que hay que procesarlo.
+    if (!error) return false;
 
-    // 23505 = duplicate key. Cualquier otro error no debe bloquear el mensaje.
+    // 23505 = duplicate key: ya estaba reservado, es un reintento de Meta.
+    // Cualquier otro error no debe bloquear el mensaje.
     if (error.code === '23505') return true;
 
     console.warn('⚠️  No se pudo registrar el message_id para dedup:', error.message);
