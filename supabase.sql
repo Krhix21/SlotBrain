@@ -1,18 +1,16 @@
-create table barberos (
-  id uuid default gen_random_uuid() primary key,
-  telefono_bot text unique not null,
-  correo text,
-  refresh_token text not null,
-  activo boolean default true,
-  created_at timestamp default now()
-);
-
--- Historial resumido (no guarda todo el chat, solo eventos importantes)
--- La tabla historial_chats ya existe en Supabase con:
---   id, user_id, role, content, timestamp
+-- ============================================================================
+-- ARCHIVO RETIRADO - NO EJECUTES ESTO
+-- ============================================================================
 --
--- Roles que usa el bot:
---   cliente        → nombre y teléfono del cliente
---   cita_agendada  → servicio, fecha y hora
---   cita_cancelada → cita que se canceló
---   cita_modificada → cambio de horario
+-- Este archivo era un borrador del primer prototipo. Creaba una tabla
+-- `barberos` que ningún código ha usado nunca: la tabla real siempre fue
+-- `trabajadores`. Ejecutarlo no produce una base utilizable y además deja
+-- `barberos` ahí, con datos sueltos.
+--
+-- Usa uno de estos en su lugar:
+--
+--   · Base de datos NUEVA  ->  supabase-schema.sql
+--   · Base ya con datos    ->  supabase-migracion-v2.sql
+--                              y luego supabase-migracion-v3.sql
+--
+-- La documentación está en README.md.

@@ -3,100 +3,67 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Xheros Barber - Configuración</title>
+<title>Configuración del bot</title>
 </head>
 <body style="margin:0;font-family:sans-serif;background:#0c0a09;color:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;">
-  <div style="text-align:center;padding:40px;max-width:440px;">
+  <div style="text-align:center;padding:40px;max-width:520px;">
 
-    <h1 style="color:#f59e0b;font-size:26px;margin-bottom:8px;">Xheros Barber 💈</h1>
+    <h1 style="color:#f59e0b;font-size:26px;margin-bottom:8px;">Bot de WhatsApp 💈</h1>
 
-    <!-- PASO 1: escanear QR -->
-    <div id="pasoQr">
-      <p style="color:#d6d3d1;font-size:15px;line-height:1.5;">
-        Paso 1 de 2: escanea este código con tu WhatsApp
-        (Ajustes → Dispositivos vinculados → Vincular un dispositivo).
-      </p>
-      <div id="qrContainer" style="margin:20px auto;min-height:260px;display:flex;align-items:center;justify-content:center;">
-        <p id="qrCargando" style="color:#78716c;">Generando código QR...</p>
-        <img id="qrImg" style="display:none;max-width:260px;border-radius:8px;background:#fff;padding:12px;" />
-      </div>
-    </div>
+    <!--
+      Antes esta página escaneaba un QR de whatsapp-web.js.
+      Con la Meta Cloud API no hay QR: el número ya está registrado en
+      Meta y es el mismo para siempre. Lo que queda por configurar se
+      hace desde el panel de administración.
+    -->
 
-    <!-- PASO 2: conectar Google Calendar -->
-    <div id="pasoGoogle" style="display:none;">
-      <p style="color:#22c55e;font-size:15px;">✅ WhatsApp conectado (<span id="numeroDetectado"></span>)</p>
-      <p style="color:#d6d3d1;font-size:15px;line-height:1.5;margin-top:16px;">
-        Paso 2 de 2: conecta tu Google Calendar para que las citas se agenden automáticamente.
-      </p>
-      <a id="btnConectar"
-         style="display:inline-block;margin-top:20px;padding:14px 28px;background:#f59e0b;color:#0c0a09;
+    <div style="text-align:left;background:#1c1917;border:1px solid #292524;border-radius:10px;padding:20px;margin-top:24px;">
+      <h2 style="color:#f59e0b;font-size:17px;margin:0 0 12px;">¿Qué falta configurar?</h2>
+
+      <ol style="color:#d6d3d1;font-size:14px;line-height:1.9;padding-left:20px;margin:0;">
+        <li>Registrar tu número de WhatsApp en el panel → <strong>Números</strong>.</li>
+        <li>Crear al menos un profesional y enlazarle su Google Calendar.</li>
+        <li>Definir los servicios que ofrece.</li>
+      </ol>
+
+      <a href="/admin.html"
+         style="display:inline-block;margin-top:18px;padding:12px 24px;background:#f59e0b;color:#0c0a09;
                 text-decoration:none;border-radius:8px;font-weight:bold;">
-          Conectar con Google
+        Ir al panel de administración
       </a>
     </div>
 
-    <!-- Todo listo -->
-    <div id="pasoListo" style="display:none;">
-      <p style="font-size:40px;">🎉</p>
-      <h2 style="color:#f59e0b;">¡Todo listo!</h2>
-      <p style="color:#d6d3d1;">
-        WhatsApp y Google Calendar (<span id="correoConectado"></span>) están conectados.
-        Ya puedes cerrar esta página.
-      </p>
+    <div id="estadoGeneral" style="margin-top:20px;font-size:13px;color:#78716c;">
+      <span id="estadoTexto">Consultando estado del servidor...</span>
     </div>
 
   </div>
 
   <script>
-    const qrContainer = document.getElementById('qrContainer');
-    const qrCargando = document.getElementById('qrCargando');
-    const qrImg = document.getElementById('qrImg');
-    const pasoQr = document.getElementById('pasoQr');
-    const pasoGoogle = document.getElementById('pasoGoogle');
-    const pasoListo = document.getElementById('pasoListo');
-    const btnConectar = document.getElementById('btnConectar');
-    const numeroDetectado = document.getElementById('numeroDetectado');
-    const correoConectado = document.getElementById('correoConectado');
+    // Esta página ya no gestiona la conexión: solo informa si el
+    // servidor responde y si hay algún profesional con calendario listo.
+    const estadoTexto = document.getElementById('estadoTexto');
 
-    async function actualizarEstado() {
+    async function consultarEstado() {
       try {
         const res = await fetch('/api/estado');
         const estado = await res.json();
 
-        if (!estado.whatsappListo) {
-          // Seguimos en el paso del QR
-          pasoQr.style.display = 'block';
-          pasoGoogle.style.display = 'none';
-          pasoListo.style.display = 'none';
-
-          if (estado.qrDataUrl) {
-            qrCargando.style.display = 'none';
-            qrImg.style.display = 'inline-block';
-            qrImg.src = estado.qrDataUrl;
-          }
-          return;
-        }
-
-        // WhatsApp ya conectado
         if (estado.calendarConectado) {
-          pasoQr.style.display = 'none';
-          pasoGoogle.style.display = 'none';
-          pasoListo.style.display = 'block';
-          correoConectado.textContent = estado.correoCalendario || '';
+          const n = estado.calendariosEnlazados;
+          estadoTexto.textContent = `Hay ${n} calendario${n === 1 ? '' : 's'} enlazado${n === 1 ? '' : 's'} en esta sesión.`;
+          estadoTexto.style.color = '#22c55e';
         } else {
-          pasoQr.style.display = 'none';
-          pasoGoogle.style.display = 'block';
-          pasoListo.style.display = 'none';
-          numeroDetectado.textContent = estado.telefonoBot || '';
-          btnConectar.href = `/auth/google?telefono_bot=${encodeURIComponent(estado.telefonoBot)}`;
+          estadoTexto.textContent = 'El servidor está arriba. Enlaza los calendarios desde el panel.';
+          estadoTexto.style.color = '#a8a29e';
         }
       } catch (err) {
-        console.error('Error consultando estado:', err);
+        estadoTexto.textContent = 'El servidor no responde.';
+        estadoTexto.style.color = '#ef4444';
       }
     }
 
-    actualizarEstado();
-    setInterval(actualizarEstado, 2000);
+    consultarEstado();
   </script>
 </body>
 </html>

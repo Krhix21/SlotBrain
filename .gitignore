@@ -1,7 +1,8 @@
 node_modules/
-.wwebjs_auth/
-.wwebjs_cache/
-conversaciones.json
 .env
 *.log
 .DS_Store
+
+# Residuos de whatsapp-web.js (ya no se usa, pero por si aparecen)
+.wwebjs_auth/
+.wwebjs_cache/

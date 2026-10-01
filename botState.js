@@ -1,32 +1,42 @@
-// Estado en memoria compartido entre bot.js (que genera el QR y detecta el número)
-// y server.js/auth.js (que lo exponen a la página de vinculación vía /api/estado).
+// Estado en memoria compartido entre auth.js (que enlaza el Google Calendar
+// de un trabajador) y el panel de administración.
+//
+// Antes vivía aquí el QR de whatsapp-web.js. Con la Cloud API de Meta el
+// número ya se conoce por configuración, así que no hay nada que escanear.
+//
+// OJO con el alcance de esto: es memoria del proceso, no estado real. Se
+// pierde en cada deploy y con varios workers de Render hay instancias
+// distintas. La fuente de verdad de si un calendario está enlazado es la
+// tabla `trabajadores.refresh_token`. Esto solo sirve para que la página
+// pública pueda decir "hay calendarios enlazados" sin tocar la base.
 
-const state = {
-    qrDataUrl: null,      // imagen QR en base64 para mostrar en el navegador
-    whatsappListo: false, // true cuando ya se escaneó el QR y whatsapp-web.js está conectado
-    telefonoBot: null,    // número de WhatsApp del barbero, obtenido automáticamente al conectar
-    calendarConectado: false,
-    correoCalendario: null
-};
+/** trabajador_id -> correo del calendario enlazado */
+const calendarios = new Map();
 
-function setQr(dataUrl) {
-    state.qrDataUrl = dataUrl;
-    state.whatsappListo = false;
+/**
+ * Registra un calendario enlazado.
+ * @param {string} trabajadorId
+ * @param {string|null} correo
+ */
+function setCalendarConectado(trabajadorId, correo = null) {
+    if (!trabajadorId) return;
+    if (correo) {
+        calendarios.set(trabajadorId, correo);
+    } else {
+        calendarios.set(trabajadorId, null);
+    }
 }
 
-function setWhatsappListo(telefonoBot) {
-    state.whatsappListo = true;
-    state.qrDataUrl = null;
-    state.telefonoBot = telefonoBot;
-}
-
-function setCalendarConectado(conectado, correo = null) {
-    state.calendarConectado = conectado;
-    state.correoCalendario = correo;
-}
-
+/**
+ * Resumen para la página pública.
+ * No devuelve los correos: esa ruta no lleva autenticación y un correo de
+ * Google es dato personal de un tercero.
+ */
 function getState() {
-    return { ...state };
+    return {
+        calendarConectado: calendarios.size > 0,
+        calendariosEnlazados: calendarios.size
+    };
 }
 
-module.exports = { setQr, setWhatsappListo, setCalendarConectado, getState };
+module.exports = { setCalendarConectado, getState };

@@ -1,324 +1,366 @@
-const { google } = require('googleapis');
+// ============================================================
+// Integración con Google Calendar.
+//
+// Cada cita pertenece a un TRABAJADOR, y cada trabajador tiene su propio
+// Google Calendar enlazado por OAuth. Por eso todas las funciones
+// reciben `trabajador` en lugar de un número de bot.
+//
+// Las fechas se manejan con la zona horaria IANA de la empresa
+// (ver tiempo.js), no con offsets fijos.
+// ============================================================
+
 const { createClient } = require('@supabase/supabase-js');
+const { crearCalendar } = require('./googleAuth');
+const { confirmarSlot } = require('./disponibilidad');
+const {
+    ZONA_POR_DEFECTO,
+    zonedToUtc,
+    esFechaValida,
+    normalizarHora
+} = require('./tiempo');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
-const ZONA_HORARIA_DEFAULT = 'America/Bogota';
-const OFFSET_DEFAULT = '-05:00';
-const DURACION_DEFAULT_MS = 60 * 60 * 1000; // 60 min
+const ESTADOS_VIGENTES = ['agendada', 'confirmada'];
 
-async function getCalendarClientForTrabajador(telefono_bot) {
+function zonaDe(empresa) {
+    return empresa?.zona_horaria || ZONA_POR_DEFECTO;
+}
+
+function nombreDeTrabajador(trabajador, empresa) {
+    const quien = trabajador?.nombre;
+    if (quien) return quien;
+    return 'el profesional';
+}
+
+function validacion(fecha, hora) {
+    if (!esFechaValida(fecha)) return 'La fecha no se entendió bien.';
+    if (!normalizarHora(hora)) return 'La hora no se entendió bien.';
+    return null;
+}
+
+/** ¿Tiene este trabajador un calendario usable? */
+async function trabajadorEstaConectado(trabajadorId) {
     const { data, error } = await supabase
         .from('trabajadores')
-        .select('refresh_token, correo, empresa_id')
-        .eq('telefono_bot', telefono_bot)
+        .select('id, nombre, correo, empresa_id')
+        .eq('id', trabajadorId)
         .eq('activo', true)
-        .single();
+        .maybeSingle();
 
-    if (error || !data) {
-        console.error('❌ No se encontró trabajador conectado:', telefono_bot, error?.message);
+    if (error) {
+        console.error('Error consultando trabajador:', error.message);
         return null;
     }
+    if (!data || !data.correo) return null;
+    return data;
+}
 
-    console.log(`🗓️  Usando el calendario de: ${data.correo} (telefono_bot: ${telefono_bot})`);
+/**
+ * Crea la cita en el Google Calendar del trabajador y la registra en `citas`.
+ * SIEMPRE re-verifica disponibilidad en el instante: entre que el bot
+ * ofreció el slot y el cliente confirmó, alguien más pudo tomarlo.
+ *
+ * @returns {Promise<{exitoso:boolean, mensaje:string, cita?:object}>}
+ */
+async function agendarCita({ empresa, trabajador, servicio, fecha, hora, telefonoCliente, nombreCliente }) {
+    const problema = validacion(fecha, hora);
+    if (problema) return { exitoso: false, mensaje: problema };
 
-    const oauth2Client = new google.auth.OAuth2(
-        process.env.GOOGLE_CLIENT_ID,
-        process.env.GOOGLE_CLIENT_SECRET,
-        process.env.GOOGLE_REDIRECT_URI
-    );
+    hora = normalizarHora(hora);
 
-    oauth2Client.setCredentials({ refresh_token: data.refresh_token });
-    
-    // Obtener configuración de la empresa si existe
-    let empresaConfig = null;
-    if (data.empresa_id) {
-        const { data: empresa, error: empresaError } = await supabase
-            .from('empresas')
-            .select('*')
-            .eq('id', data.empresa_id)
-            .single();
-        
-        if (!empresaError && empresa) {
-            empresaConfig = empresa;
+    if (!trabajador?.refresh_token) {
+        return {
+            exitoso: false,
+            mensaje: `${nombreDeTrabajador(trabajador, empresa)} todavía no tiene un Google Calendar conectado.`
+        };
+    }
+
+    const zona = zonaDe(empresa);
+    const duracionMinutos = servicio?.duracion_minutos || 60;
+
+    const verificacion = await confirmarSlot({ empresa, trabajador, fecha, hora, duracionMinutos });
+
+    if (!verificacion.libre) {
+        console.log(`⚠️  Slot rechazado (${fecha} ${hora}, ${nombreDeTrabajador(trabajador, empresa)}): ${verificacion.motivo}`);
+        return {
+            exitoso: false,
+            mensaje: `Ese horario ${verificacion.motivo}.`
+        };
+    }
+
+    const inicio = zonedToUtc(fecha, hora, zona);
+    const fin = new Date(inicio.getTime() + duracionMinutos * 60 * 1000);
+
+    const resumen = `${servicio?.nombre || 'Cita'} - ${nombreCliente || telefonoCliente}`;
+    const descripcion = [
+        `Cita reservada por el bot de WhatsApp de ${empresa?.nombre || 'nuestro negocio'}.`,
+        `Cliente: ${nombreCliente || 'sin nombre'} (${telefonoCliente}).`
+    ].join('\n');
+
+    let eventoId = null;
+
+    try {
+        const calendar = crearCalendar(trabajador.refresh_token);
+
+        const { data: evento } = await calendar.events.insert({
+            calendarId: 'primary',
+            resource: {
+                summary: resumen,
+                description: descripcion,
+                location: empresa?.direccion || undefined,
+                start: { dateTime: inicio.toISOString(), timeZone: zona },
+                end: { dateTime: fin.toISOString(), timeZone: zona },
+                reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 60 }] }
+            }
+        });
+
+        eventoId = evento?.id;
+        console.log(`✅ Cita creada en el calendario de ${nombreDeTrabajador(trabajador, empresa)}: ${eventoId}`);
+    } catch (error) {
+        console.error('❌ Error creando el evento en Google Calendar:', error.message);
+
+        if (error.code === 401 || error.code === 403 || error.code === 400) {
+            return {
+                exitoso: false,
+                mensaje: `La conexión con el calendario de ${nombreDeTrabajador(trabajador, empresa)} expiró o fue revocada. Hay que volver a enlazarla desde el panel.`
+            };
         }
+        return { exitoso: false, mensaje: 'Hubo un problema técnico al escribir en la agenda.' };
+    }
+
+    // El evento ya existe: si falla el INSERT en Supabase lo registramos igual
+    // (perder la trazabilidad en la base sería peor que un registro huérfano).
+    let citaId = null;
+
+    const { data: cita, error: errorCita } = await supabase
+        .from('citas')
+        .insert({
+            empresa_id: empresa.id,
+            trabajador_id: trabajador.id,
+            nombre_cliente: nombreCliente || telefonoCliente,
+            telefono_cliente: telefonoCliente,
+            servicio_id: servicio?.id || null,
+            nombre_servicio: servicio?.nombre || 'Servicio',
+            fecha,
+            hora,
+            duracion_minutos: duracionMinutos,
+            inicio_utc: inicio.toISOString(),
+            evento_google_id: eventoId,
+            estado: 'confirmada',
+            canal: 'whatsapp'
+        })
+        .select()
+        .single();
+
+    if (errorCita) {
+        console.error('⚠️  Evento creado en Google pero la cita no se guardó en Supabase:', errorCita.message);
+    } else {
+        citaId = cita?.id;
     }
 
     return {
-        calendar: google.calendar({ version: 'v3', auth: oauth2Client }),
-        correo: data.correo,
-        empresaConfig
+        exitoso: true,
+        mensaje: `Cita confirmada para el ${fecha} a las ${hora}.`,
+        cita: cita || { id: citaId, fecha, hora }
     };
 }
 
-async function consultarDisponibilidad(args, telefono_bot) {
-    console.log('==> [consultar_disponibilidad] Args recibidos:', args, '| telefono_bot:', telefono_bot);
+/**
+ * Busca la cita vigente de un cliente en una fecha y hora concretas.
+ * Se consulta la tabla `citas`, no el summary del evento: buscar por
+ * nombre en el calendario rompía con dos clientes homónimos.
+ */
+async function buscarCita({ empresa, telefonoCliente, fecha, hora }) {
+    let consulta = supabase
+        .from('citas')
+        .select('*')
+        .eq('empresa_id', empresa.id)
+        .eq('telefono_cliente', telefonoCliente)
+        .in('estado', ESTADOS_VIGENTES);
 
-    const clientData = await getCalendarClientForTrabajador(telefono_bot);
-    if (!clientData) {
-        return { exitoso: false, mensaje: 'Este negocio todavía no ha conectado su calendario.' };
+    if (fecha) consulta = consulta.eq('fecha', fecha);
+    if (hora) consulta = consulta.eq('hora', hora);
+
+    const { data, error } = await consulta
+        .order('creado_en', { ascending: false })
+        .limit(1);
+
+    if (error) {
+        console.error('Error buscando la cita:', error.message);
+        return null;
     }
+    return (data && data[0]) || null;
+}
 
-    const { calendar, empresaConfig } = clientData;
-    
-    const zonaHoraria = empresaConfig?.zona_horaria || ZONA_HORARIA_DEFAULT;
-    const offset = zonaHoraria === 'America/Bogota' ? OFFSET_DEFAULT : '+00:00';
+/** Cita vigente más próxima del cliente, para "cancélala" sin dar la fecha. */
+async function citaVigente({ empresa, telefonoCliente }) {
+    let consulta = supabase
+        .from('citas')
+        .select('*')
+        .eq('empresa_id', empresa.id)
+        .eq('telefono_cliente', telefonoCliente)
+        .in('estado', ESTADOS_VIGENTES);
 
-    const inicio = new Date(`${args.fecha}T${args.hora}:00${offset}`);
-    const fin = new Date(inicio.getTime() + DURACION_DEFAULT_MS);
+    const { data, error } = await consulta.order('fecha', { ascending: true }).limit(1);
 
-    if (isNaN(inicio.getTime())) {
-        console.error('❌ Fecha/hora inválida recibida del modelo:', args.fecha, args.hora);
-        return { exitoso: false, mensaje: 'La fecha u hora no se entendió correctamente, ¿puedes repetirla en formato día y hora?' };
+    if (error) {
+        console.error('Error buscando cita vigente:', error.message);
+        return null;
     }
+    return (data && data[0]) || null;
+}
+
+async function borrarEventoGoogle(trabajador, eventoGoogleId) {
+    if (!eventoGoogleId || !trabajador?.refresh_token) return false;
 
     try {
-        const { data } = await calendar.events.list({
-            calendarId: 'primary',
-            timeMin: inicio.toISOString(),
-            timeMax: fin.toISOString(),
-            singleEvents: true
-        });
+        const calendar = crearCalendar(trabajador.refresh_token);
+        await calendar.events.delete({ calendarId: 'primary', eventId: eventoGoogleId });
+        return true;
+    } catch (error) {
+        // 404/410: el evento ya no está, que es justo lo que queríamos.
+        if (error.code === 404 || error.code === 410) return true;
+        console.error('❌ Error borrando el evento de Google:', error.message);
+        return false;
+    }
+}
 
-        const disponible = data.items.length === 0;
-        console.log(`📅 Disponibilidad para ${args.fecha} ${args.hora}: ${disponible ? 'LIBRE' : 'OCUPADO'}`);
+/**
+ * Cancela una cita: borra el evento y marca el registro.
+ * @returns {Promise<{exitoso:boolean, mensaje:string, cita?:object}>}
+ */
+async function cancelarCita({ empresa, trabajador, cita, canceladoPor = 'cliente', motivo = null }) {
+    if (!cita) {
+        return { exitoso: false, mensaje: 'No encontré ninguna cita tuya para cancelar.' };
+    }
 
+    const borrado = await borrarEventoGoogle(trabajador, cita.evento_google_id);
+
+    if (!borrado) {
         return {
-            exitoso: true,
-            disponible,
-            mensaje: disponible ? 'El horario está disponible.' : 'El horario ya está ocupado.'
+            exitoso: false,
+            mensaje: 'No pude borrar la cita del calendario. Inténtalo de nuevo en un momento.'
         };
-    } catch (err) {
-        console.error('❌ Error consultando disponibilidad:', err.message);
-        return { exitoso: false, mensaje: 'Hubo un problema técnico al consultar la agenda.' };
     }
+
+    const { error } = await supabase
+        .from('citas')
+        .update({
+            estado: 'cancelada',
+            cancelado_por: canceladoPor,
+            motivo_cancelacion: motivo
+        })
+        .eq('id', cita.id);
+
+    if (error) {
+        console.error('⚠️  Evento borrado de Google pero la cita no se actualizó:', error.message);
+    }
+
+    console.log(`🗑️  Cita cancelada: ${cita.fecha} ${cita.hora} (${nombreDeTrabajador(trabajador, empresa)})`);
+
+    return {
+        exitoso: true,
+        mensaje: `Cita del ${cita.fecha} a las ${cita.hora} cancelada.`,
+        cita
+    };
 }
 
-async function verificarYAgendarCita(args, telefono_bot) {
-    console.log('==> [agendar_cita] Args recibidos:', args, '| telefono_bot:', telefono_bot);
-
-    const clientData = await getCalendarClientForTrabajador(telefono_bot);
-    if (!clientData) {
-        return { exitoso: false, mensaje: 'Este negocio todavía no ha conectado su calendario. Debe hacerlo desde el panel.' };
+/**
+ * Mueve una cita. Verifica que el nuevo horario esté libre antes de tocar nada.
+ * @returns {Promise<{exitoso:boolean, mensaje:string, cita?:object}>}
+ */
+async function modificarCita({ empresa, trabajador, cita, nuevaFecha, nuevaHora }) {
+    if (!cita) {
+        return { exitoso: false, mensaje: 'No encontré ninguna cita tuya para mover.' };
     }
 
-    const { calendar, empresaConfig } = clientData;
-    
-    // Usar configuración de empresa o valores por defecto
-    const zonaHoraria = empresaConfig?.zona_horaria || ZONA_HORARIA_DEFAULT;
-    const offset = zonaHoraria === 'America/Bogota' ? OFFSET_DEFAULT : '+00:00';
-    
-    // Obtener duración del servicio si existe
-    let duracionMs = DURACION_DEFAULT_MS;
-    if (empresaConfig && args.servicio) {
-        const { data: servicio } = await supabase
-            .from('servicios')
-            .select('duracion_minutos')
-            .eq('empresa_id', empresaConfig.id)
-            .eq('nombre', args.servicio)
-            .single();
-        
-        if (servicio) {
-            duracionMs = servicio.duracion_minutos * 60 * 1000;
-        }
+    nuevaHora = normalizarHora(nuevaHora);
+
+    const problema = validacion(nuevaFecha, nuevaHora);
+    if (problema) return { exitoso: false, mensaje: problema };
+
+    // Si la hora no cambió, no hay nada que hacer.
+    if (nuevaFecha === cita.fecha && nuevaHora === cita.hora) {
+        return { exitoso: false, mensaje: 'Esa es la misma hora que ya tienes.' };
     }
 
-    const inicio = new Date(`${args.fecha}T${args.hora}:00${offset}`);
-    const fin = new Date(inicio.getTime() + duracionMs);
+    const zona = zonaDe(empresa);
+    const duracionMinutos = cita.duracion_minutos || 60;
 
-    if (isNaN(inicio.getTime())) {
-        console.error('❌ Fecha/hora inválida recibida del modelo:', args.fecha, args.hora);
-        return { exitoso: false, mensaje: 'La fecha u hora no se entendió correctamente, ¿puedes repetirla en formato día y hora?' };
-    }
+    const inicioNuevo = zonedToUtc(nuevaFecha, nuevaHora, zona);
+    const finNuevo = new Date(inicioNuevo.getTime() + duracionMinutos * 60 * 1000);
+    const inicioViejo = zonedToUtc(cita.fecha, cita.hora, zona);
+    const finViejo = new Date(inicioViejo.getTime() + duracionMinutos * 60 * 1000);
 
-    try {
-        const { data: existentes } = await calendar.events.list({
-            calendarId: 'primary',
-            timeMin: inicio.toISOString(),
-            timeMax: fin.toISOString(),
-            singleEvents: true
-        });
+    // Mismas comprobaciones que al agendar (¿ya pasó? ¿dentro del horario?
+    // ¿libre en Google? ¿bloqueado?), pero ignorando el evento de esta misma
+    // cita, que ocupa el rango viejo. Antes aquí solo se miraba el
+    // freebusy: se podía mover una cita a un domingo o a una hora ya pasada
+    // porque el calendario estaba libre.
+    const comprobacion = await confirmarSlot({
+        empresa,
+        trabajador,
+        fecha: nuevaFecha,
+        hora: nuevaHora,
+        duracionMinutos,
+        ignorarIntervalo: { inicioMs: inicioViejo.getTime(), finMs: finViejo.getTime() }
+    });
 
-        if (existentes.items.length > 0) {
-            console.log('⚠️  Horario ocupado, no se agenda.');
-            return { exitoso: false, mensaje: `El horario de las ${args.hora} ya está ocupado.` };
-        }
-
-        const nombreEmpresa = empresaConfig?.nombre || 'Xheros Barber';
-        const { data: eventoCreado } = await calendar.events.insert({
-            calendarId: 'primary',
-            resource: {
-                summary: `💈 ${args.servicio} - ${args.nombre_cliente}`,
-                description: `Cita agendada por XheroBot vía WhatsApp para ${nombreEmpresa}.`,
-                start: { dateTime: inicio.toISOString(), timeZone: zonaHoraria },
-                end: { dateTime: fin.toISOString(), timeZone: zonaHoraria },
-                reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 30 }] }
-            }
-        });
-
-        console.log(`✅ Evento creado. ID: ${eventoCreado.id} | Link: ${eventoCreado.htmlLink}`);
-
-        // Guardar cita en base de datos
-        if (empresaConfig) {
-            try {
-                await supabase.from('citas').insert({
-                    empresa_id: empresaConfig.id,
-                    trabajador_id: (await supabase.from('trabajadores').select('id').eq('telefono_bot', telefono_bot).single()).data?.id,
-                    nombre_cliente: args.nombre_cliente,
-                    servicio_id: null, // TODO: obtener ID del servicio
-                    nombre_servicio: args.servicio,
-                    fecha: args.fecha,
-                    hora: args.hora,
-                    evento_google_id: eventoCreado.id,
-                    estado: 'agendada'
-                });
-            } catch (dbError) {
-                console.error('⚠️  Error guardando cita en DB:', dbError);
-            }
-        }
-
+    if (!comprobacion.libre) {
         return {
-            exitoso: true,
-            mensaje: `Cita agendada con éxito para ${args.nombre_cliente}. Servicio: ${args.servicio} el día ${args.fecha} a las ${args.hora}.`
+            exitoso: false,
+            mensaje: `No pude mover la cita a esa hora porque ${comprobacion.motivo}.`
         };
-    } catch (err) {
-        console.error('❌ Error agendando cita:', err.message);
-        if (err.code === 401 || err.code === 400) {
-            return { exitoso: false, mensaje: 'La conexión con el calendario de este negocio expiró o fue revocada. Debe reconectarla desde el panel.' };
-        }
-        return { exitoso: false, mensaje: 'Hubo un problema técnico al acceder a la agenda.' };
-    }
-}
-
-async function cancelarCita(args, telefono_bot) {
-    const clientData = await getCalendarClientForTrabajador(telefono_bot);
-    if (!clientData) {
-        return { exitoso: false, mensaje: 'Este negocio todavía no ha conectado su calendario.' };
     }
 
-    const { calendar, empresaConfig } = clientData;
-    
-    const zonaHoraria = empresaConfig?.zona_horaria || ZONA_HORARIA_DEFAULT;
-    const offset = zonaHoraria === 'America/Bogota' ? OFFSET_DEFAULT : '+00:00';
-
-    const inicio = new Date(`${args.fecha}T${args.hora}:00${offset}`);
-    const fin = new Date(inicio.getTime() + DURACION_DEFAULT_MS);
-
-    try {
-        const { data } = await calendar.events.list({
-            calendarId: 'primary',
-            timeMin: inicio.toISOString(),
-            timeMax: fin.toISOString(),
-            singleEvents: true
-        });
-
-        const evento = data.items.find(e => e.summary?.includes(args.nombre_cliente));
-        if (!evento) {
-            return { exitoso: false, mensaje: `No se encontró cita de ${args.nombre_cliente} para el día ${args.fecha} a las ${args.hora}.` };
+    if (cita.evento_google_id && trabajador?.refresh_token) {
+        try {
+            const calendar = crearCalendar(trabajador.refresh_token);
+            await calendar.events.patch({
+                calendarId: 'primary',
+                eventId: cita.evento_google_id,
+                resource: {
+                    start: { dateTime: inicioNuevo.toISOString(), timeZone: zona },
+                    end: { dateTime: finNuevo.toISOString(), timeZone: zona }
+                }
+            });
+        } catch (error) {
+            console.error('❌ Error moviendo el evento en Google Calendar:', error.message);
+            return { exitoso: false, mensaje: 'No pude mover la cita en el calendario. Inténtalo de nuevo.' };
         }
-
-        await calendar.events.delete({ calendarId: 'primary', eventId: evento.id });
-
-        // Actualizar estado en DB
-        if (empresaConfig) {
-            try {
-                await supabase
-                    .from('citas')
-                    .update({ estado: 'cancelada' })
-                    .eq('evento_google_id', evento.id);
-            } catch (dbError) {
-                console.error('⚠️  Error actualizando cita en DB:', dbError);
-            }
-        }
-
-        return { exitoso: true, mensaje: `Cita cancelada con éxito para ${args.nombre_cliente} el día ${args.fecha} a las ${args.hora}.` };
-    } catch (err) {
-        console.error('❌ Error cancelando cita:', err.message);
-        return { exitoso: false, mensaje: 'Hubo un problema técnico al cancelar la cita.' };
-    }
-}
-
-async function modificarCita(args, telefono_bot) {
-    const clientData = await getCalendarClientForTrabajador(telefono_bot);
-    if (!clientData) {
-        return { exitoso: false, mensaje: 'Este negocio todavía no ha conectado su calendario.' };
     }
 
-    const { calendar, empresaConfig } = clientData;
-    
-    const zonaHoraria = empresaConfig?.zona_horaria || ZONA_HORARIA_DEFAULT;
-    const offset = zonaHoraria === 'America/Bogota' ? OFFSET_DEFAULT : '+00:00';
-
-    const inicioActual = new Date(`${args.fecha_actual}T${args.hora_actual}:00${offset}`);
-    const finActual = new Date(inicioActual.getTime() + DURACION_DEFAULT_MS);
-
-    try {
-        const { data } = await calendar.events.list({
-            calendarId: 'primary',
-            timeMin: inicioActual.toISOString(),
-            timeMax: finActual.toISOString(),
-            singleEvents: true
-        });
-
-        const evento = data.items.find(e => e.summary?.includes(args.nombre_cliente));
-        if (!evento) {
-            return { exitoso: false, mensaje: `No se encontró cita de ${args.nombre_cliente} para modificar.` };
-        }
-
-        const inicioNuevo = new Date(`${args.nueva_fecha}T${args.nueva_hora}:00${offset}`);
-        const finNuevo = new Date(inicioNuevo.getTime() + DURACION_DEFAULT_MS);
-
-        const { data: choque } = await calendar.events.list({
-            calendarId: 'primary',
-            timeMin: inicioNuevo.toISOString(),
-            timeMax: finNuevo.toISOString(),
-            singleEvents: true
-        });
-
-        if (choque.items.length > 0) {
-            return { exitoso: false, mensaje: `El nuevo horario (${args.nueva_fecha} a las ${args.nueva_hora}) ya está ocupado.` };
-        }
-
-        await calendar.events.patch({
-            calendarId: 'primary',
-            eventId: evento.id,
-            resource: {
-                start: { dateTime: inicioNuevo.toISOString(), timeZone: zonaHoraria },
-                end: { dateTime: finNuevo.toISOString(), timeZone: zonaHoraria }
-            }
-        });
-
-        // Actualizar en DB
-        if (empresaConfig) {
-            try {
-                await supabase
-                    .from('citas')
-                    .update({ 
-                        fecha: args.nueva_fecha,
-                        hora: args.nueva_hora
-                    })
-                    .eq('evento_google_id', evento.id);
-            } catch (dbError) {
-                console.error('⚠️  Error actualizando cita en DB:', dbError);
-            }
-        }
-
-        return { exitoso: true, mensaje: `Cita modificada con éxito. Nuevo horario: ${args.nueva_fecha} a las ${args.nueva_hora}.` };
-    } catch (err) {
-        console.error('❌ Error modificando cita:', err.message);
-        return { exitoso: false, mensaje: 'Hubo un problema técnico al modificar la cita.' };
-    }
-}
-
-// Útil para el panel/admin: saber si un trabajador ya conectó su calendario
-async function trabajadorEstaConectado(telefono_bot) {
-    const { data } = await supabase
-        .from('trabajadores')
-        .select('correo, empresa_id')
-        .eq('telefono_bot', telefono_bot)
-        .eq('activo', true)
+    const { data: actualizada, error } = await supabase
+        .from('citas')
+        .update({
+            fecha: nuevaFecha,
+            hora: nuevaHora,
+            inicio_utc: inicioNuevo.toISOString()
+        })
+        .eq('id', cita.id)
+        .select()
         .single();
-    return data || null;
+
+    if (error) {
+        console.error('⚠️  Evento movido en Google pero la cita no se actualizó:', error.message);
+    }
+
+    console.log(`↪️  Cita movida: ${cita.fecha} ${cita.hora} → ${nuevaFecha} ${nuevaHora}`);
+
+    return {
+        exitoso: true,
+        mensaje: `Cita movida al ${nuevaFecha} a las ${nuevaHora}.`,
+        cita: actualizada || cita
+    };
 }
 
-module.exports = { verificarYAgendarCita, cancelarCita, modificarCita, consultarDisponibilidad, trabajadorEstaConectado };
+module.exports = {
+    agendarCita,
+    cancelarCita,
+    modificarCita,
+    buscarCita,
+    citaVigente,
+    trabajadorEstaConectado,
+    ESTADOS_VIGENTES
+};
