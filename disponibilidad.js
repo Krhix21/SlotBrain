@@ -159,11 +159,16 @@ async function consultarOcupado(trabajador, desdeIso, hastaIso, zona) {
     try {
         const calendar = crearCalendar(trabajador.refresh_token);
 
+        // Los parámetros van dentro de `requestBody`: el body de la petición
+        // solo se toma de ahí (o de `resource`). Pasados planos acaban en el
+        // query string y Google responde "Missing timeMin parameter".
         const { data } = await calendar.freebusy.query({
-            timeMin: desdeIso,
-            timeMax: hastaIso,
-            timeZone: zona,
-            items: [{ id: 'primary' }]
+            requestBody: {
+                timeMin: desdeIso,
+                timeMax: hastaIso,
+                timeZone: zona,
+                items: [{ id: 'primary' }]
+            }
         });
 
         const entrada = data?.calendars?.['primary'] || Object.values(data?.calendars || {})[0];
@@ -215,7 +220,7 @@ function pasoDeSlots(trabajador, empresa) {
 
 /**
  * Slots libres de un trabajador concreto para una fecha.
- * @returns {Promise<{hora:string, trabajador_id:string, trabajador_nombre:string}[]>}
+ * @returns {Promise<{slots:Array, inaccesible:boolean}>}
  */
 async function slotsDeTrabajador({ trabajador, empresa, fecha, duracionMinutos, incluirPasados = false }) {
     const zona = empresa.zona_horaria || ZONA_POR_DEFECTO;
@@ -236,8 +241,9 @@ async function slotsDeTrabajador({ trabajador, empresa, fecha, duracionMinutos, 
         obtenerBloqueos(trabajador.id, fecha)
     ]);
 
-    // El calendario no se pudo leer: no prometemos horas que no pudimos verificar.
-    if (ocupado.inaccesible) return [];
+    // El calendario no se pudo leer: no prometemos horas que no pudimos
+    // verificar. El motivo sube para no reportarlo como "día sin horas".
+    if (ocupado.inaccesible) return { slots: [], inaccesible: true };
 
     const bloqueados = intervalosDeBloqueo(bloqueos, fecha, zona);
     const ocupados = [...ocupado.bloques, ...bloqueados];
@@ -266,7 +272,7 @@ async function slotsDeTrabajador({ trabajador, empresa, fecha, duracionMinutos, 
         }
     }
 
-    return slots;
+    return { slots, inaccesible: false };
 }
 
 /**
@@ -316,14 +322,14 @@ async function obtenerSlots({ empresa, servicios = [], fecha, duracionMinutos = 
 
     const resultados = await Promise.all(
         candidatos.map(async trabajador => {
-            const slots = await slotsDeTrabajador({
+            const { slots, inaccesible } = await slotsDeTrabajador({
                 trabajador,
                 empresa,
                 fecha,
                 duracionMinutos,
                 incluirPasados
             });
-            return { trabajador, slots };
+            return { trabajador, slots, inaccesible };
         })
     );
 
@@ -337,7 +343,15 @@ async function obtenerSlots({ empresa, servicios = [], fecha, duracionMinutos = 
             slots: r.slots.map(s => s.hora)
         }));
 
-    return { slots, trabajadores, motivo: null };
+    // Un calendario ilegible y un día lleno se ven igual desde afuera, pero
+    // no son lo mismo: sin este motivo el bot responde "no hay horas libres"
+    // y el problema real (el token vencido) solo aparece en el log.
+    const inaccesibles = resultados.filter(r => r.inaccesible);
+    const motivo = (slots.length === 0 && inaccesibles.length > 0)
+        ? `No pude leer el calendario de ${inaccesibles.map(r => r.trabajador.nombre || 'el profesional').join(', ')}.`
+        : null;
+
+    return { slots, trabajadores, motivo };
 }
 
 /**
