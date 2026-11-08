@@ -21,6 +21,18 @@ const bcrypt = require('bcryptjs');
 
 const SESSION_TTL = 8 * 60 * 60 * 1000;
 
+/**
+ * El ADMIN_USER original no era un correo ("admin"): para que el usuario
+ * inicial y su login hablem del MISMO registro, ambos normalizan igual.
+ */
+function normalizarCorreoAdmin(texto) {
+    let email = String(texto || '').trim().toLowerCase();
+    if (!correoValido(email)) {
+        email = `${email.replace(/[^a-z0-9._-]/g, '')}@slotbrain.local`;
+    }
+    return email;
+}
+
 function generarToken() {
     return crypto.randomBytes(32).toString('hex');
 }
@@ -39,11 +51,7 @@ async function prepararUsuarioInicial() {
     }
     if (count > 0) return;
 
-    // Si el ADMIN_USER no es un correo, se le da forma de correo interno.
-    let email = process.env.ADMIN_USER.trim().toLowerCase();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-        email = `${email.replace(/[^a-z0-9._-]/g, '')}@slotbrain.local`;
-    }
+    const email = normalizarCorreoAdmin(process.env.ADMIN_USER);
 
     const { error: errIns } = await supabase.from('usuarios_admin').insert({
         email,
@@ -110,8 +118,10 @@ async function login(req, res) {
 
     await prepararUsuarioInicial();
 
-    const email = String(body.email || body.usuario || '').trim().toLowerCase();
-    if (!email) return res.status(400).json({ error: 'Envía tu correo y contraseña' });
+    const email = normalizarCorreoAdmin(body.email || body.usuario);
+    if (!body.email && !body.usuario) {
+        return res.status(400).json({ error: 'Envía tu correo y contraseña' });
+    }
 
     const { data: usuario, error } = await supabase
         .from('usuarios_admin')
