@@ -86,28 +86,54 @@
 <body style="background:#0a0a0b; color:#f0f0f0; min-height:100vh;">
 
 <!-- ═══════════════════════════════════════════
+     LOGO SLOTBRAIN (símbolos compartidos)
+════════════════════════════════════════════ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<linearGradient id="sbGrad" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#fde68a"/><stop offset="1" stop-color="#f59e0b"/>
+</linearGradient>
+<symbol id="sbLogo" viewBox="0 0 72 68">
+    <rect x="0" y="0" width="48" height="16" rx="8" fill="url(#sbGrad)"/>
+    <rect x="16" y="26" width="48" height="16" rx="8" fill="url(#sbGrad)"/>
+    <rect x="0" y="52" width="48" height="16" rx="8" fill="url(#sbGrad)"/>
+    <circle cx="62" cy="8" r="8" fill="#fff"/>
+</symbol>
+<symbol id="sbLogoInk" viewBox="0 0 72 68">
+    <rect x="0" y="0" width="48" height="16" rx="8" fill="#1a1100"/>
+    <rect x="16" y="26" width="48" height="16" rx="8" fill="#1a1100"/>
+    <rect x="0" y="52" width="48" height="16" rx="8" fill="#1a1100"/>
+    <circle cx="62" cy="8" r="8" fill="#fff"/>
+</symbol>
+</defs></svg>
+
+<!-- ═══════════════════════════════════════════
      LOGIN SCREEN
 ════════════════════════════════════════════ -->
-<div id="loginScreen" class="login-bg" style="display:flex; min-height:100vh; align-items:center; justify-content:center; padding:1rem;">
-    <div style="width:100%; max-width:420px;">
+<div id="loginScreen" class="login-bg" style="display:flex; min-height:100vh; align-items:center; justify-content:center; padding:1rem; position:relative; overflow:hidden;">
+    <div aria-hidden="true" style="position:absolute; border-radius:50%; filter:blur(90px); opacity:.3; pointer-events:none; width:420px; height:420px; background:#d97706; top:-120px; left:-100px;"></div>
+    <div aria-hidden="true" style="position:absolute; border-radius:50%; filter:blur(90px); opacity:.28; pointer-events:none; width:340px; height:340px; background:#f59e0b; bottom:-100px; right:-90px;"></div>
 
-        <!-- Logo -->
-        <div style="text-align:center; margin-bottom:2rem;">
-            <div style="display:inline-flex; align-items:center; justify-content:center; width:60px; height:60px; border-radius:16px; background:linear-gradient(135deg,#f59e0b,#d97706); margin-bottom:1rem;">
-                <i class="fas fa-scissors" style="font-size:1.4rem; color:#0a0a0b;"></i>
+    <div style="width:100%; max-width:400px; position:relative;">
+
+        <!-- Identidad SlotBrain -->
+        <div style="text-align:center; margin-bottom:1.75rem;">
+            <div style="display:inline-flex; align-items:center; justify-content:center; width:60px; height:56px; border-radius:18px; background:linear-gradient(135deg,#f59e0b,#d97706); box-shadow:0 14px 40px -12px rgba(245,158,11,.6); margin-bottom:1rem;">
+                <svg aria-hidden="true" style="width:34px; height:32px;"><use href="#sbLogoInk"/></svg>
             </div>
-            <h1 style="font-size:1.5rem; font-weight:800; color:#fff; margin:0 0 0.25rem;">Panel de Administración</h1>
-            <p style="color:#6b7280; font-size:0.875rem; margin:0;">Sistema de Citas por WhatsApp</p>
+            <h1 aria-label="SlotBrain" style="font-size:2rem; font-weight:800; color:#fff; margin:0 0 0.3rem; letter-spacing:-1px;">
+                slot<span style="background:linear-gradient(120deg,#fde68a,#f59e0b 45%,#d97706); -webkit-background-clip:text; background-clip:text; color:transparent;">brain</span>
+            </h1>
+            <p style="color:#6b7280; font-size:0.8rem; margin:0;">Sistema de citas con IA · Por WhatsApp</p>
         </div>
 
         <!-- Card login -->
-        <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:20px; padding:2rem; backdrop-filter:blur(10px);">
+        <div style="background:#141414; border:1px solid #262626; border-radius:24px; padding:2rem; box-shadow:0 30px 60px -30px rgba(0,0,0,.8);">
             <form id="loginForm">
                 <!-- Correo -->
                 <div style="margin-bottom:1.25rem;">
-                    <label style="display:block; font-size:0.8rem; font-weight:500; color:#9ca3af; margin-bottom:0.5rem;">CORREO</label>
+                    <label for="loginUser" style="display:block; font-size:0.68rem; font-weight:600; color:#8b8b95; letter-spacing:0.08em; margin-bottom:0.45rem;">CORREO</label>
                     <div style="position:relative;">
-                        <i class="fas fa-user" style="position:absolute; left:14px; top:50%; transform:translateY(-50%); color:#4b5563; font-size:0.8rem;"></i>
+                        <i class="fas fa-envelope" style="position:absolute; left:14px; top:50%; transform:translateY(-50%); color:#4b5563; font-size:0.8rem;"></i>
                         <input id="loginUser" type="text" placeholder="tu@empresa.com" autocomplete="username"
                             class="field input-glow"
                             style="width:100%; padding:0.8rem 1rem 0.8rem 2.5rem; border-radius:10px; font-size:0.875rem; transition:all 0.2s;">
@@ -116,13 +142,18 @@
 
                 <!-- Password -->
                 <div style="margin-bottom:1.5rem;">
-                    <label style="display:block; font-size:0.8rem; font-weight:500; color:#9ca3af; margin-bottom:0.5rem;">CONTRASEÑA</label>
+                    <label for="loginPass" style="display:block; font-size:0.68rem; font-weight:600; color:#8b8b95; letter-spacing:0.08em; margin-bottom:0.45rem;">CONTRASEÑA</label>
                     <div style="position:relative;">
                         <i class="fas fa-lock" style="position:absolute; left:14px; top:50%; transform:translateY(-50%); color:#4b5563; font-size:0.8rem;"></i>
                         <input id="loginPass" type="password" placeholder="••••••••" autocomplete="current-password"
                             class="field input-glow"
                             style="width:100%; padding:0.8rem 1rem 0.8rem 2.5rem; border-radius:10px; font-size:0.875rem; transition:all 0.2s;">
                     </div>
+                </div>
+
+                <!-- Aviso de clave temporal -->
+                <div id="loginAviso" style="display:none; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); border-radius:8px; padding:0.55rem 0.75rem; margin-bottom:0.9rem; font-size:0.72rem; color:#fbbf24; line-height:1.5;">
+                    Si entras por primera vez con la clave temporal, el panel te pedirá crear una propia.
                 </div>
 
                 <!-- Error -->
@@ -132,15 +163,18 @@
                 </div>
 
                 <!-- Submit -->
-                <button id="loginBtn" type="submit" class="btn-gold" style="width:100%; padding:0.85rem; border-radius:10px; border:none; cursor:pointer; font-size:0.875rem; display:flex; align-items:center; justify-content:center; gap:8px;">
+                <button id="loginBtn" type="submit" class="btn-gold" style="width:100%; padding:0.85rem; border-radius:12px; border:none; cursor:pointer; font-size:0.875rem; font-weight:600; display:flex; align-items:center; justify-content:center; gap:8px;">
                     <i class="fas fa-sign-in-alt"></i>
                     Iniciar sesión
                 </button>
             </form>
         </div>
 
-        <p style="text-align:center; color:#374151; font-size:0.75rem; margin-top:1.5rem;">
+        <p style="text-align:center; color:#5b5b66; font-size:0.72rem; margin-top:1.25rem;">
             Acceso restringido · Solo personal autorizado
+        </p>
+        <p style="text-align:center; margin-top:0.4rem;">
+            <a href="/" style="color:#4b5563; font-size:0.72rem; text-decoration:none;" onmouseover="this.style.color='#f59e0b'" onmouseout="this.style.color='#4b5563'">← Volver a la landing</a>
         </p>
     </div>
 </div>
@@ -154,14 +188,14 @@
     <aside id="sidebar" style="width:256px; min-height:100vh; background:#0d0d10; border-right:1px solid #1a1a22; display:flex; flex-direction:column; position:fixed; top:0; left:0; bottom:0; z-index:10;">
 
         <!-- Logo -->
-        <div style="padding:1.5rem 1.25rem 1rem; border-bottom:1px solid #1a1a22;">
+        <div id="sidebarLogo" style="padding:1.5rem 1.25rem 1rem; border-bottom:1px solid #1a1a22;">
             <div style="display:flex; align-items:center; gap:12px;">
-                <div style="width:38px; height:38px; border-radius:10px; background:linear-gradient(135deg,#f59e0b,#d97706); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-                    <i class="fas fa-scissors" style="color:#0a0a0b; font-size:0.9rem;"></i>
+                <div style="width:38px; height:36px; border-radius:10px; background:linear-gradient(135deg,#f59e0b,#d97706); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                    <svg aria-hidden="true" style="width:22px; height:21px;"><use href="#sbLogoInk"/></svg>
                 </div>
-                <div>
-                    <div style="font-weight:700; font-size:0.875rem; color:#fff;">Panel Admin</div>
-                    <div style="font-size:0.7rem; color:#4b5563;">Sistema de Citas</div>
+                <div style="min-width:0;">
+                    <div aria-label="SlotBrain" style="font-weight:700; font-size:0.9rem; color:#fff; letter-spacing:-0.3px;">slot<span style="color:#f59e0b;">brain</span></div>
+                    <div id="sidebarRol" style="font-size:0.68rem; color:#4b5563;">Panel</div>
                 </div>
             </div>
         </div>
@@ -172,6 +206,11 @@
                 style="width:100%; text-align:left; display:flex; align-items:center; gap:10px; padding:0.7rem 1rem; border-radius:10px; border:none; cursor:pointer; font-size:0.8rem; font-weight:500; border-left:3px solid transparent;">
                 <i class="fas fa-building" style="width:16px; text-align:center;"></i>
                 Empresas
+            </button>
+            <button id="nav-miempresa" onclick="showSection('miempresa')" class="nav-item"
+                style="display:none; width:100%; text-align:left; align-items:center; gap:10px; padding:0.7rem 1rem; border-radius:10px; border:none; cursor:pointer; font-size:0.8rem; font-weight:500; color:#6b7280; border-left:3px solid transparent;">
+                <i class="fas fa-store" style="width:16px; text-align:center;"></i>
+                Mi Empresa
             </button>
             <button id="nav-numeros" onclick="showSection('numeros')" class="nav-item"
                 style="width:100%; text-align:left; display:flex; align-items:center; gap:10px; padding:0.7rem 1rem; border-radius:10px; border:none; cursor:pointer; font-size:0.8rem; font-weight:500; color:#6b7280; border-left:3px solid transparent;">
@@ -237,6 +276,22 @@
             </div>
         </section>
 
+        <!-- ══ MI EMPRESA (vistas de empresa: propietario/staff) ══ -->
+        <section id="secMiEmpresa" class="fade-in" style="display:none; padding:2.5rem;">
+            <div style="max-width:900px; margin:0 auto;">
+                <div style="margin-bottom:2rem;">
+                    <h2 style="font-size:1.6rem; font-weight:800; color:#fff; margin:0 0 4px;">Mi Empresa</h2>
+                    <p style="color:#4b5563; font-size:0.875rem; margin:0;">Datos de tu negocio, marca y cómo habla tu bot</p>
+                </div>
+                <div id="miEmpresaPanel">
+                    <div style="text-align:center; padding:4rem 0; color:#374151;">
+                        <i class="fas fa-spinner fa-spin" style="font-size:1.5rem; margin-bottom:0.75rem; display:block;"></i>
+                        Cargando tu empresa...
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <!-- ══ NÚMEROS ══ -->
         <section id="secNumeros" class="fade-in" style="display:none; padding:2.5rem;">
             <div style="max-width:900px; margin:0 auto;">
@@ -252,13 +307,14 @@
 
                 <div class="card" style="padding:1rem 1.25rem; margin-bottom:1.5rem; border-left:3px solid #f59e0b;">
                     <p style="font-size:0.78rem; color:#9ca3af; margin:0; line-height:1.6;">
-                        El número que aparece aquí es el que está registrado en Meta. Los tokens van en las variables de
-                        entorno del servidor (<code style="color:#f59e0b;">META_TOKENS_JSON</code>), nunca en esta base de datos.
-                        Registra el número con su código de país, sin el <code style="color:#f59e0b;">+</code>.
+                        Cada empresa conecta <strong>su propio número de WhatsApp</strong>. Al guardarlo,
+                        el token queda <strong>cifrado en la base</strong> y nunca vuelve a mostrarse.
+                        El mapa de entorno <code style="color:#f59e0b;">META_TOKENS_JSON</code> sigue
+                        como primera opción de respaldo. Registra el número con su código de país, sin el <code style="color:#f59e0b;">+</code>.
                     </p>
                 </div>
 
-                <div class="card" style="padding:1.25rem; margin-bottom:1.5rem;">
+                <div id="contenedorSelectorNumeros" class="card" style="padding:1.25rem; margin-bottom:1.5rem;">
                     <label style="display:block; font-size:0.75rem; font-weight:600; color:#6b7280; margin-bottom:0.5rem; letter-spacing:0.05em;">EMPRESA</label>
                     <select id="selectorEmpresaNumeros" class="field input-glow" onchange="onEmpresaNumerosChange()"
                         style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem; cursor:pointer;">
@@ -405,6 +461,77 @@
                     <p style="font-size:0.7rem; color:#4b5563; margin-top:4px;">Variables: <code style="color:#f59e0b;">{nombre} {servicio} {fecha} {hora} {nombre_negocio}</code></p>
                 </div>
             </div>
+
+            <!-- ── Marca y nicho (Fase 2) ── -->
+            <div style="margin:1.5rem 0 1rem;">
+                <h4 style="font-size:0.75rem; font-weight:700; color:#f59e0b; letter-spacing:0.08em; text-transform:uppercase; margin:0 0 0.75rem;">Marca y nicho</h4>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+                    <div>
+                        <label class="lbl">Logo (URL de la imagen)</label>
+                        <div style="display:flex; align-items:center; gap:0.75rem;">
+                            <img id="empLogoPreview" src="" alt="" style="width:44px; height:44px; border-radius:10px; object-fit:cover; display:none; border:1px solid #2a2a35; flex-shrink:0;">
+                            <input id="empLogoUrl" type="url" placeholder="https://.../logo.png" class="field input-glow" style="flex:1; min-width:0; padding:0.65rem 0.85rem; border-radius:10px; font-size:0.8rem;" onchange="refrescarPreviewLogo()">
+                        </div>
+                        <p style="font-size:0.68rem; color:#4b5563; margin-top:4px;">Se muestra en tu panel y en la landing futura.</p>
+                    </div>
+                    <div>
+                        <label class="lbl">Color de la marca</label>
+                        <div style="display:flex; align-items:center; gap:0.6rem;">
+                            <input id="empColor" type="color" value="#f59e0b" style="width:44px; height:44px; padding:4px; border-radius:10px; border:1px solid #2a2a35; background:#16161c; cursor:pointer; flex-shrink:0;">
+                            <input id="empColorHex" type="text" value="#f59e0b" placeholder="#f59e0b" class="field input-glow" style="flex:1; min-width:0; padding:0.65rem 0.85rem; border-radius:10px; font-size:0.8rem;" onchange="document.getElementById('empColor').value=this.value">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="lbl">Moneda</label>
+                        <select id="empMoneda" class="field input-glow" style="width:100%; padding:0.65rem 0.85rem; border-radius:10px; font-size:0.8rem; cursor:pointer;">
+                            <option value="COP">COP · Peso colombiano</option>
+                            <option value="MXN">MXN · Peso mexicano</option>
+                            <option value="USD">USD · Dólar</option>
+                            <option value="EUR">EUR · Euro</option>
+                            <option value="PEN">PEN · Sol peruano</option>
+                            <option value="ARS">ARS · Peso argentino</option>
+                            <option value="CLP">CLP · Peso chileno</option>
+                            <option value="VES">VES · Bolívar</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="lbl">Recordatorio al profesional (h antes)</label>
+                        <input id="empProfHoras" type="number" value="24" min="1" max="168" class="field input-glow" style="width:100%; padding:0.65rem 0.85rem; border-radius:10px; font-size:0.8rem;">
+                    </div>
+                    <div>
+                        <label class="lbl">Recordatorio al cliente (h antes)</label>
+                        <input id="empCliHoras" type="number" value="2" min="0" max="48" class="field input-glow" style="width:100%; padding:0.65rem 0.85rem; border-radius:10px; font-size:0.8rem;">
+                    </div>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-top:1rem;">
+                    <div>
+                        <label class="lbl">Cómo llamo a lo que vendes (singular / plural)</label>
+                        <div style="display:flex; gap:0.5rem;">
+                            <input id="empTermServS" type="text" placeholder="servicio" class="field input-glow" style="flex:1; min-width:0; padding:0.65rem 0.85rem; border-radius:10px; font-size:0.8rem;">
+                            <input id="empTermServP" type="text" placeholder="servicios" class="field input-glow" style="flex:1; min-width:0; padding:0.65rem 0.85rem; border-radius:10px; font-size:0.8rem;">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="lbl">Cómo llamo al profesional (singular / plural)</label>
+                        <div style="display:flex; gap:0.5rem;">
+                            <input id="empTermProfS" type="text" placeholder="barbero" class="field input-glow" style="flex:1; min-width:0; padding:0.65rem 0.85rem; border-radius:10px; font-size:0.8rem;">
+                            <input id="empTermProfP" type="text" placeholder="barberos" class="field input-glow" style="flex:1; min-width:0; padding:0.65rem 0.85rem; border-radius:10px; font-size:0.8rem;">
+                        </div>
+                    </div>
+                    <div style="grid-column:1/-1;">
+                        <label class="lbl">Indicaciones del bot para este nicho</label>
+                        <textarea id="empPromptBase" rows="3" placeholder="Ej: Es una clínica dental: nunca des diagnósticos por chat, invita a valoración presencial..." class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.8rem; resize:none;"></textarea>
+                        <p style="font-size:0.68rem; color:#4b5563; margin-top:4px;">El bot lo incluye en su prompt sin poder sobrepasar las reglas de seguridad.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── Entregar panel al propietario (solo al CREAR, solo superadmin) ── -->
+            <div id="bloqueAdminEmail" style="display:none; margin-bottom:1rem; padding:1rem; border:1px solid rgba(245,158,11,0.3); background:rgba(245,158,11,0.06); border-radius:12px;">
+                <label class="lbl" style="color:#fbbf24;">Entregar acceso al propietario de esta empresa</label>
+                <input id="empAdminEmail" type="text" placeholder="correo-del-propietario@negocio.com" class="field input-glow" style="width:100%; padding:0.65rem 0.85rem; border-radius:10px; font-size:0.8rem;">
+                <p style="font-size:0.68rem; color:#9ca3af; margin-top:4px;">Al guardar, se crea su usuario con una <strong>clave temporal</strong> que te mostraré una sola vez.</p>
+            </div>
             <div style="display:flex; gap:0.75rem; margin-top:1.5rem;">
                 <button type="button" onclick="cerrarModal('modalEmpresa')" style="flex:1; padding:0.75rem; border-radius:10px; border:1px solid #2a2a35; background:none; color:#9ca3af; font-size:0.875rem; cursor:pointer; font-weight:500;" onmouseover="this.style.background='rgba(255,255,255,0.04)'" onmouseout="this.style.background='none'">
                     Cancelar
@@ -472,25 +599,47 @@
     </div>
 </div>
 
-<!-- Modal Número -->
+<!-- Modal Número (wizard: conectar con Meta) -->
 <div id="modalNumero" class="modal-bg" style="display:none; position:fixed; inset:0; z-index:100; align-items:center; justify-content:center; padding:1rem;">
-    <div class="modal-box" style="width:100%; max-width:500px; padding:2rem;">
-        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem;">
-            <h3 style="font-size:1.1rem; font-weight:700; color:#fff; margin:0;">Agregar número de WhatsApp</h3>
+    <div class="modal-box" style="width:100%; max-width:560px; max-height:90vh; overflow-y:auto; padding:2rem;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem;">
+            <h3 style="font-size:1.1rem; font-weight:700; color:#fff; margin:0;">Conectar número de WhatsApp</h3>
             <button onclick="cerrarModal('modalNumero')" style="background:none; border:none; cursor:pointer; color:#4b5563; font-size:1.1rem;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#4b5563'">
                 <i class="fas fa-times"></i>
             </button>
         </div>
+
+        <!-- Paso a paso -->
+        <div style="background:#0d0d10; border:1px solid #1e1e26; border-radius:12px; padding:1rem 1.25rem; margin-bottom:1.25rem; font-size:0.72rem; color:#9ca3af; line-height:1.7;">
+            <p style="margin:0 0 4px; color:#f59e0b; font-weight:700; letter-spacing:0.06em; text-transform:uppercase;">Paso a paso · 5 minutos</p>
+            <p style="margin:0;">1. Tu Meta Business ya debe estar <strong>verificado</strong> (empresa) y tener una <strong>WABA</strong> con tu número agregado; el número NO puede estar activo en la app del celular.</p>
+            <p style="margin:0;">2. En Meta for Developers → tu app → <strong>Usuarios del sistema</strong>: crea uno, guárdalo y genera un <strong>token permanente</strong> con permisos <code style="color:#f59e0b;">whatsapp_business_management</code> y <code style="color:#f59e0b;">whatsapp_business_messaging</code>.</p>
+            <p style="margin:0;">3. En WhatsApp → <strong>API Setup</strong>: copia el <strong>Phone Number ID</strong>.</p>
+            <p style="margin:0;">4. Pega las 3 cosas abajo y pulsa <strong>Probar conexión</strong>: si Meta responde, te lleno el teléfono yo mismo.</p>
+            <p style="margin:0;">5. Guardar: el token queda <strong>cifrado</strong> y nunca vuelve a mostrarse.</p>
+        </div>
+
         <form id="formNumero">
             <div style="display:flex; flex-direction:column; gap:1rem;">
                 <div>
-                    <label class="lbl">Teléfono (con código de país, sin +) *</label>
-                    <input id="numTelefono" type="text" placeholder="573001234567" class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem;">
-                </div>
-                <div>
                     <label class="lbl">Phone Number ID de Meta *</label>
                     <input id="numPhoneId" type="text" placeholder="123456789012345" class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem;">
-                    <p style="font-size:0.7rem; color:#4b5563; margin-top:4px;">En Meta for Developers → WhatsApp → API Setup.</p>
+                </div>
+                <div>
+                    <label class="lbl">Token permanente de Meta *</label>
+                    <input id="numToken" type="password" placeholder="Pégra aquí el token..." class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem;">
+                    <p style="font-size:0.68rem; color:#4b5563; margin-top:4px;">Queda cifrado en el servidor. Solo se usa para enviar mensajes con tu número.</p>
+                </div>
+                <div>
+                    <button type="button" onclick="probarConexionMeta()" id="btnProbarMeta" class="btn-gold" style="width:100%; padding:0.7rem; border-radius:10px; border:none; cursor:pointer; font-size:0.8rem; display:flex; align-items:center; justify-content:center; gap:6px;">
+                        <i class="fas fa-plug-circle-check"></i> Probar conexión con Meta
+                    </button>
+                    <div id="resultadoPruebaMeta" style="display:none; border-radius:10px; padding:0.75rem 1rem; margin-top:0.75rem; font-size:0.78rem; line-height:1.5;"></div>
+                </div>
+                <div>
+                    <label class="lbl">Teléfono (con código de país, sin +) *</label>
+                    <input id="numTelefono" type="text" placeholder="573001234567" class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem;">
+                    <p style="font-size:0.68rem; color:#4b5563; margin-top:4px;">Si la prueba sale bien, el número real se llena solo.</p>
                 </div>
                 <div>
                     <label class="lbl">Etiqueta</label>
@@ -502,7 +651,7 @@
                     Cancelar
                 </button>
                 <button type="submit" class="btn-gold" style="flex:2; padding:0.75rem; border-radius:10px; border:none; cursor:pointer; font-size:0.875rem; display:flex; align-items:center; justify-content:center; gap:6px;">
-                    <i class="fas fa-save"></i> Guardar
+                    <i class="fas fa-save"></i> Guardar número
                 </button>
             </div>
         </form>
@@ -669,11 +818,36 @@ function mostrarLogin() {
     document.getElementById('dashboard').style.display = 'none';
 }
 
+/** Rol del usuario en sesión ('superadmin' | 'propietario' | 'staff'). */
+function rolActual() {
+    return localStorage.getItem('adminRol') || 'superadmin';
+}
+
+function esSuperadminUI() {
+    return rolActual() === 'superadmin';
+}
+
+function empresaIdActual() {
+    return localStorage.getItem('adminEmpresaId') || null;
+}
+
+/** Muestra u oculta secciones según el rol y personaliza el sidebar. */
+function aplicarRol() {
+    const esAdmin = esSuperadminUI();
+    document.getElementById('nav-empresas').style.display = esAdmin ? '' : 'none';
+    document.getElementById('nav-miempresa').style.display = esAdmin ? 'none' : 'flex';
+    document.getElementById('sidebarRol').textContent = esAdmin
+        ? 'Panel plataforma'
+        : 'Panel de tu empresa';
+}
+
 function mostrarDashboard() {
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('dashboard').style.display = 'flex';
     document.getElementById('sidebarUser').textContent = localStorage.getItem('adminUser') || 'Admin';
-    showSection('empresas');
+    aplicarRol();
+    // Un usuario de empresa entra directo a sus números; el superadmin ve la plataforma.
+    showSection(esSuperadminUI() ? 'empresas' : 'numeros');
 }
 
 // ─────────────────────────────────────────────
@@ -704,6 +878,11 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
             token = data.token;
             localStorage.setItem('adminToken', token);
             localStorage.setItem('adminUser', data.usuario || usuario);
+            localStorage.setItem('adminRol', data.rol || 'superadmin');
+            localStorage.setItem('adminEmpresaId', data.empresa_id || '');
+            if (data.debe_cambiar_clave) {
+                document.getElementById('loginAviso').style.display = 'block';
+            }
             mostrarDashboard();
         } else {
             document.getElementById('loginErrorMsg').textContent = data.error || 'Credenciales incorrectas';
@@ -723,6 +902,9 @@ async function doLogout() {
     token = null;
     localStorage.removeItem('adminToken');
     localStorage.removeItem('adminUser');
+    localStorage.removeItem('adminRol');
+    localStorage.removeItem('adminEmpresaId');
+    document.getElementById('loginAviso').style.display = 'none';
     mostrarLogin();
 }
 
@@ -753,21 +935,24 @@ async function apiFetch(method, path, body = null) {
 // ─────────────────────────────────────────────
 function showSection(sec) {
     // Nav items
-    ['empresas','numeros','trabajadores','servicios','citas'].forEach(s => {
+    ['empresas','miempresa','numeros','trabajadores','servicios','citas'].forEach(s => {
         const el = document.getElementById(`nav-${s}`);
+        if (!el) return;
         el.classList.remove('active');
         el.style.color = '#6b7280';
     });
-    const active = document.getElementById(`nav-${sec}`);
+    const active = document.getElementById(`nav-${sec}`) || document.getElementById('nav-empresas');
     active.classList.add('active');
     active.style.color = '#fbbf24';
 
     // Sections
-    ['Empresas','Numeros','Trabajadores','Servicios','Citas'].forEach(s => {
-        document.getElementById(`sec${s}`).style.display = 'none';
+    ['Empresas','MiEmpresa','Numeros','Trabajadores','Servicios','Citas'].forEach(s => {
+        const el = document.getElementById(`sec${s}`);
+        if (el) el.style.display = 'none';
     });
     const secMap = {
         empresas: 'secEmpresas',
+        miempresa: 'secMiEmpresa',
         numeros: 'secNumeros',
         trabajadores: 'secTrabajadores',
         servicios: 'secServicios',
@@ -777,10 +962,76 @@ function showSection(sec) {
 
     // Load
     if (sec === 'empresas') cargarEmpresas();
+    else if (sec === 'miempresa') cargarMiEmpresa();
     else if (sec === 'numeros') cargarEmpresas().then(poblarSelectorEmpresaNumeros);
     else if (sec === 'trabajadores') cargarEmpresas().then(cargarTrabajadores);
     else if (sec === 'servicios') poblarSelectorEmpresaServicios();
     else if (sec === 'citas') cargarEmpresas().then(poblarSelectorEmpresaCitas);
+}
+
+// ─────────────────────────────────────────────
+// EMPRESAS
+// ─────────────────────────────────────────────
+async function cargarEmpresas() {
+    try {
+        const res = await apiFetch('GET', '/api/admin/empresas');
+        empresasCache = await res.json();
+        renderEmpresas();
+        renderMiEmpresa();
+    } catch (e) { if (e.message !== 'unauthorized') console.error(e); }
+}
+
+/** Vista "Mi Empresa": la empresa del usuario (propietario/staff). */
+function miEmpresaCache() {
+    const id = empresaIdActual();
+    return empresasCache.find(e => e.id === id) || null;
+}
+
+function renderMiEmpresa() {
+    const cont = document.getElementById('miEmpresaPanel');
+    if (!cont) return;
+    const emp = miEmpresaCache();
+
+    if (!emp) {
+        cont.innerHTML = `
+            <div style="text-align:center; padding:4rem 0; color:#374151;">
+                <i class="fas fa-store" style="font-size:2.5rem; margin-bottom:1rem; display:block; color:#1f2937;"></i>
+                <p style="margin-bottom:1rem;">Tu usuario aún no está ligado a ninguna empresa.<br>Habla con el administrador de la plataforma.</p>
+            </div>`;
+        return;
+    }
+
+    const termino = emp.terminologia && Object.keys(emp.terminologia).length ? emp.terminologia : null;
+    cont.innerHTML = `
+        <div class="card fade-in" style="padding:1.75rem; margin-bottom:1rem;">
+            <div style="display:flex; align-items:flex-start; gap:1.25rem; flex-wrap:wrap;">
+                ${emp.logo_url
+                    ? `<img src="${escHtml(emp.logo_url)}" alt="Logo" style="width:64px; height:64px; border-radius:14px; object-fit:cover; border:1px solid #2a2a35;">`
+                    : `<div style="width:64px; height:64px; border-radius:14px; background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.25); display:flex; align-items:center; justify-content:center;"><i class="fas fa-store" style="color:#f59e0b;"></i></div>`}
+                <div style="flex:1; min-width:200px;">
+                    <h3 style="font-size:1.15rem; font-weight:800; color:#fff; margin:0 0 4px;">${escHtml(emp.nombre)}</h3>
+                    ${emp.descripcion ? `<p style="font-size:0.82rem; color:#9ca3af; margin:0 0 8px;">${escHtml(emp.descripcion)}</p>` : ''}
+                    <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:6px;">
+                        <span class="badge-amber" style="padding:4px 10px; border-radius:99px; font-size:0.72rem;">Moneda: ${escHtml(emp.moneda || 'COP')}</span>
+                        <span style="font-size:0.72rem; color:#6b7280;"><i class="fas fa-globe" style="margin-right:4px;"></i>${escHtml(emp.zona_horaria || 'America/Bogota')}</span>
+                        ${termino ? `<span class="badge-gray" style="padding:4px 10px; border-radius:99px; font-size:0.72rem;">Nicho: ${escHtml(termino.profesional_singular || '')}s</span>` : ''}
+                        ${emp.prompt_base ? `<span class="badge-green" style="padding:4px 10px; border-radius:99px; font-size:0.72rem;">Prompt personalizado ✓</span>` : ''}
+                    </div>
+                </div>
+                <button onclick="editarEmpresa('${emp.id}')" class="btn-gold" style="padding:0.6rem 1.25rem; border-radius:10px; border:none; cursor:pointer; font-size:0.8rem;">
+                    <i class="fas fa-edit" style="margin-right:5px;"></i>Editar mi empresa
+                </button>
+            </div>
+            ${emp.prompt_base ? `
+            <div class="card-inner" style="margin-top:1rem; padding:0.85rem 1rem;">
+                <p style="font-size:0.7rem; color:#4b5563; margin:0 0 4px; text-transform:uppercase; font-weight:600; letter-spacing:0.05em;">Indicaciones del bot (nicho)</p>
+                <p style="font-size:0.8rem; color:#9ca3af; margin:0;">${escHtml(emp.prompt_base.substring(0,200))}${emp.prompt_base.length > 200 ? '…' : ''}</p>
+            </div>` : ''}
+        </div>`;
+}
+
+async function cargarMiEmpresa() {
+    await cargarEmpresas(); // renderEmpresas también refresca renderMiEmpresa
 }
 
 // ─────────────────────────────────────────────
@@ -839,11 +1090,31 @@ function renderEmpresas() {
     `).join('');
 }
 
+function refrescarPreviewLogo() {
+    const url = document.getElementById('empLogoUrl').value.trim();
+    const img = document.getElementById('empLogoPreview');
+    if (url && url.startsWith('http')) {
+        img.src = url;
+        img.style.display = 'block';
+        img.onerror = () => { img.style.display = 'none'; };
+    } else {
+        img.style.display = 'none';
+    }
+}
+
 function abrirModalEmpresa() {
     editingEmpresaId = null;
     document.getElementById('modalEmpresaTitulo').textContent = 'Nueva empresa';
     document.getElementById('formEmpresa').reset();
     document.getElementById('empresaIdInput').value = '';
+    document.getElementById('empZona').value = 'America/Bogota';
+    document.getElementById('empMoneda').value = 'COP';
+    document.getElementById('empColorHex').value = '#f59e0b';
+    document.getElementById('empProfHoras').value = 24;
+    document.getElementById('empCliHoras').value = 2;
+    document.getElementById('empLogoPreview').style.display = 'none';
+    // Solo el superadmin que crea la empresa nueva puede ligar a su propietario.
+    document.getElementById('bloqueAdminEmail').style.display = esSuperadminUI() ? 'block' : 'none';
     abrirModal('modalEmpresa');
 }
 
@@ -860,6 +1131,20 @@ function editarEmpresa(id) {
     document.getElementById('empDireccion').value = emp.direccion || '';
     document.getElementById('empBienvenida').value = emp.mensaje_bienvenida || '';
     document.getElementById('empConfirmacion').value = emp.mensaje_confirmacion || '';
+    document.getElementById('empLogoUrl').value = emp.logo_url || '';
+    refrescarPreviewLogo();
+    document.getElementById('empColorHex').value = emp.color_primario || '#f59e0b';
+    document.getElementById('empMoneda').value = emp.moneda || 'COP';
+    const pol = emp.politicas || {};
+    document.getElementById('empProfHoras').value = pol.recordatorio_profesional_horas ?? 24;
+    document.getElementById('empCliHoras').value = pol.recordatorio_cliente_horas ?? 2;
+    const t = emp.terminologia || {};
+    document.getElementById('empTermServS').value = t.servicio_singular || '';
+    document.getElementById('empTermServP').value = t.servicio_plural || '';
+    document.getElementById('empTermProfS').value = t.profesional_singular || '';
+    document.getElementById('empTermProfP').value = t.profesional_plural || '';
+    document.getElementById('empPromptBase').value = emp.prompt_base || '';
+    document.getElementById('bloqueAdminEmail').style.display = 'none';
     abrirModal('modalEmpresa');
 }
 
@@ -875,8 +1160,47 @@ document.getElementById('formEmpresa').addEventListener('submit', async (e) => {
         zona_horaria: document.getElementById('empZona').value,
         direccion: document.getElementById('empDireccion').value.trim(),
         mensaje_bienvenida: document.getElementById('empBienvenida').value.trim(),
-        mensaje_confirmacion: document.getElementById('empConfirmacion').value.trim()
+        mensaje_confirmacion: document.getElementById('empConfirmacion').value.trim(),
+        logo_url: document.getElementById('empLogoUrl').value.trim() || null,
+        color_primario: document.getElementById('empColorHex').value.trim() || null,
+        moneda: document.getElementById('empMoneda').value
     };
+
+    // Nicho: solo se envían los términos que el usuario escribió.
+    const servS = document.getElementById('empTermServS').value.trim();
+    const servP = document.getElementById('empTermServP').value.trim();
+    const profS = document.getElementById('empTermProfS').value.trim();
+    const profP = document.getElementById('empTermProfP').value.trim();
+    if (servS || servP || profS || profP) {
+        data.terminologia = {
+            ...(servS ? { servicio_singular: servS } : {}),
+            ...(servP ? { servicio_plural: servP } : {}),
+            ...(profS ? { profesional_singular: profS } : {}),
+            ...(profP ? { profesional_plural: profP } : {})
+        };
+    }
+
+    const promptBase = document.getElementById('empPromptBase').value.trim();
+    data.prompt_base = promptBase || null;
+
+    const profHoras = document.getElementById('empProfHoras').value;
+    const cliHoras = document.getElementById('empCliHoras').value;
+    data.politicas = {
+        recordatorio_profesional_horas: Number(profHoras) > 0 ? Number(profHoras) : 24,
+        recordatorio_cliente_horas: Number(cliHoras) >= 0 ? Number(cliHoras) : 2
+    };
+
+    // Solo al crear (superadmin): entregar el panel al propietario.
+    const adminEmail = document.getElementById('empAdminEmail').value.trim();
+    let creandoConPropietario = false;
+    if (!editingEmpresaId && esSuperadminUI() && adminEmail) {
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(adminEmail)) {
+            showToast('El correo del propietario no es válido', 'error');
+            return;
+        }
+        data.admin_email = adminEmail;
+        creandoConPropietario = true;
+    }
 
     try {
         let res;
@@ -886,8 +1210,19 @@ document.getElementById('formEmpresa').addEventListener('submit', async (e) => {
             res = await apiFetch('POST', '/api/admin/empresas', data);
         }
         if (res.ok) {
+            const creada = await res.json();
             cerrarModal('modalEmpresa');
             showToast(editingEmpresaId ? 'Empresa actualizada ✓' : 'Empresa creada ✓');
+
+            // La clave temporal SE MUESTRA UNA SOLA VEZ: el hash guardado
+            // no permite recuperarla después.
+            if (creandoConPropietario && creada.usuario_creado?.clave_temporal) {
+                try { navigator.clipboard?.writeText(creada.usuario_creado.clave_temporal); } catch {}
+                mostrarClaveTemporal(creada.usuario_creado.email, creada.usuario_creado.clave_temporal);
+            } else if (creada.usuario_error) {
+                showToast('Empresa creada, pero falló el usuario: ' + creada.usuario_error, 'error');
+            }
+
             await cargarEmpresas();
         } else {
             const err = await res.json();
@@ -895,6 +1230,41 @@ document.getElementById('formEmpresa').addEventListener('submit', async (e) => {
         }
     } catch (err) { if (err.message !== 'unauthorized') showToast('Error de conexión', 'error'); }
 });
+
+/** Modal especial: muestra la clave temporal una vez, con botón Copiar. */
+function mostrarClaveTemporal(email, clave) {
+    const html = `
+        <div class="modal-box" style="width:100%; max-width:460px; padding:2rem;">
+            <div style="text-align:center; margin-bottom:1.25rem;">
+                <div style="display:inline-flex; align-items:center; justify-content:center; width:52px; height:48px; border-radius:14px; background:linear-gradient(135deg,#f59e0b,#d97706);">
+                    <svg style="width:30px; height:28px;"><use href="#sbLogoInk"/></svg>
+                </div>
+                <h3 style="font-size:1.05rem; font-weight:700; color:#fff; margin:0.9rem 0 4px;">Propietario creado: ${escHtml(email)}</h3>
+                <p style="font-size:0.75rem; color:#9ca3af; margin:0;">Esta es su clave temporal. <strong>Se muestra una sola vez</strong>: entrégasela al dueño para que entre al panel y la cambie en su primer inicio de sesión.</p>
+            </div>
+            <div style="background:#0d0d10; border:1px dashed #f59e0b; border-radius:12px; padding:1rem; text-align:center; margin-bottom:1.25rem;">
+                <code id="claveTemporalValor" style="font-size:1.5rem; font-weight:800; color:#fbbf24; letter-spacing:3px;">${escHtml(clave)}</code>
+            </div>
+            <div style="display:flex; gap:0.75rem;">
+                <button type="button" onclick="copiarClaveTemporal()" class="btn-gold" style="flex:2; padding:0.75rem; border-radius:10px; border:none; cursor:pointer; font-size:0.85rem;">
+                    <i class="fas fa-copy"></i> Copiar clave
+                </button>
+                <button type="button" onclick="this.closest('.modal-bg').remove()" style="flex:1; padding:0.75rem; border-radius:10px; border:1px solid #2a2a35; background:none; color:#9ca3af; font-size:0.85rem; cursor:pointer;">Listo</button>
+            </div>
+        </div>`;
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-bg';
+    overlay.style.cssText = 'display:flex; position:fixed; inset:0; z-index:120; align-items:center; justify-content:center; padding:1rem;';
+    overlay.innerHTML = html;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+}
+
+function copiarClaveTemporal() {
+    const valor = document.getElementById('claveTemporalValor').textContent;
+    try { navigator.clipboard?.writeText(valor); } catch {}
+    showToast('Clave copiada ✓');
+}
 
 // ─────────────────────────────────────────────
 // TRABAJADORES
@@ -1200,6 +1570,18 @@ document.getElementById('formBloqueo').addEventListener('submit', async (e) => {
 // ─────────────────────────────────────────────
 function poblarSelectorEmpresaServicios() {
     const sel = document.getElementById('selectorEmpresaServicios');
+    const propia = empresaIdActual();
+
+    // Usuario de empresa: cero selector, su empresa carga directa.
+    if (!esSuperadminUI() && propia) {
+        sel.parentElement.style.display = 'none';
+        empresaServiciosActual = propia;
+        document.getElementById('btnNuevoServicio').style.display = 'flex';
+        cargarServicios(propia);
+        return;
+    }
+
+    sel.parentElement.style.display = 'block';
     sel.innerHTML = '<option value="">— Selecciona una empresa —</option>';
     empresasCache.forEach(e => {
         sel.innerHTML += `<option value="${e.id}">${escHtml(e.nombre)}</option>`;
@@ -1340,14 +1722,29 @@ async function eliminarServicio(id) {
 // ─────────────────────────────────────────────
 let numerosCache = [];
 
-function poblarSelectorEmpresaNumeros() {
+async function poblarSelectorEmpresaNumeros() {
     const sel = document.getElementById('selectorEmpresaNumeros');
+    const contenedor = document.getElementById('contenedorSelectorNumeros');
+    const btn = document.getElementById('btnNuevoNumero');
+    const empresaDeUsuario = empresaIdActual();
+
+    if (!esSuperadminUI() && empresaDeUsuario) {
+        // Usuario de empresa: NADA de selector, su empresa es fija y su
+        // lista carga de una.
+        contenedor.style.display = 'none';
+        btn.style.display = 'flex';
+        btn.innerHTML = '<i class="fab fa-whatsapp"></i> Conectar número de Meta';
+        await cargarNumeros(empresaDeUsuario);
+        return;
+    }
+
+    if (contenedor) contenedor.style.display = 'block';
     sel.innerHTML = '<option value="">— Selecciona una empresa —</option>';
     empresasCache.forEach(e => {
         sel.innerHTML += `<option value="${e.id}">${escHtml(e.nombre)}</option>`;
     });
     document.getElementById('listaNumeros').innerHTML = '';
-    document.getElementById('btnNuevoNumero').style.display = 'none';
+    btn.style.display = 'none';
 }
 
 async function onEmpresaNumerosChange() {
@@ -1381,9 +1778,12 @@ function renderNumeros() {
 
     if (!numerosCache.length) {
         el.innerHTML = `
-            <div style="text-align:center; padding:3rem 0; color:#374151;">
-                <i class="fab fa-whatsapp" style="font-size:2rem; margin-bottom:0.75rem; display:block; color:#1f2937;"></i>
-                <p>Esta empresa todavía no tiene ningún número de respuesta.</p>
+            <div style="text-align:center; padding:3rem 0;">
+                <i class="fab fa-whatsapp" style="font-size:2.5rem; margin-bottom:1rem; display:block; color:#25d36655;"></i>
+                <p style="color:#9ca3af; margin-bottom:1.25rem;">Esta empresa todavía no tiene ningún número de WhatsApp conectado.</p>
+                <button onclick="abrirModalNumero()" class="btn-gold" style="padding:0.75rem 1.5rem; border-radius:12px; border:none; cursor:pointer; font-size:0.85rem; font-weight:600; display:inline-flex; align-items:center; gap:8px;">
+                    <i class="fab fa-whatsapp"></i> Conectar mi número con Meta (paso a paso)
+                </button>
             </div>`;
         return;
     }
@@ -1399,6 +1799,9 @@ function renderNumeros() {
                     <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                         ${n.etiqueta ? `<span style="font-size:0.72rem; color:#9ca3af;">${escHtml(n.etiqueta)}</span>` : ''}
                         <span style="font-size:0.7rem; color:#4b5563; font-family:monospace;">${escHtml(n.phone_number_id || 'sin phone_number_id')}</span>
+                        ${n.token_conectado
+                            ? `<span class="badge-green" style="padding:2px 8px; border-radius:99px; font-size:0.68rem;">Token seguro ✓</span>`
+                            : `<span class="badge-amber" style="padding:2px 8px; border-radius:99px; font-size:0.68rem;">Sin token guardado</span>`}
                         <span class="${n.activo ? 'badge-green' : 'badge-gray'}" style="padding:2px 8px; border-radius:99px; font-size:0.68rem;">${n.activo ? 'Activo' : 'Inactivo'}</span>
                     </div>
                 </div>
@@ -1417,15 +1820,79 @@ function renderNumeros() {
 
 function abrirModalNumero() {
     document.getElementById('formNumero').reset();
+    document.getElementById('resultadoPruebaMeta').style.display = 'none';
     abrirModal('modalNumero');
+}
+
+/** Paso 4 del wizard: valida token+phone_number_id contra Meta. */
+async function probarConexionMeta() {
+    const btn = document.getElementById('btnProbarMeta');
+    const caja = document.getElementById('resultadoPruebaMeta');
+    const phoneId = document.getElementById('numPhoneId').value.trim();
+    const tokenMeta = document.getElementById('numToken').value.trim();
+
+    if (!phoneId || !tokenMeta) {
+        caja.style.display = 'block';
+        caja.style.background = 'rgba(239,68,68,0.08)';
+        caja.style.border = '1px solid rgba(239,68,68,0.25)';
+        caja.style.color = '#fca5a5';
+        caja.innerHTML = 'Pega primero el <strong>Phone Number ID</strong> y el <strong>token</strong>.';
+        return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Probando con Meta...';
+
+    try {
+        const res = await apiFetch('POST', '/api/admin/numeros/probar', {
+            phone_number_id: phoneId,
+            meta_token: tokenMeta
+        });
+        const datos = await res.json();
+
+        caja.style.display = 'block';
+        if (res.ok && datos.ok) {
+            caja.style.background = 'rgba(34,197,94,0.08)';
+            caja.style.border = '1px solid rgba(34,197,94,0.3)';
+            caja.style.color = '#86efac';
+            caja.innerHTML = `✅ Meta respondió bien:
+                <div style="margin-top:4px;">• Número real: <strong style="color:#4ade80;">+${escHtml(datos.display_phone_number || '')}</strong></div>
+                ${datos.verified_name ? `<div>• Nombre verificado: ${escHtml(datos.verified_name)}</div>` : ''}
+                <div style="margin-top:4px; font-size:0.7rem; color:#9ca3af;">Guarda el número para activarlo.</div>`;
+            if (datos.display_phone_number) {
+                document.getElementById('numTelefono').value = String(datos.display_phone_number).replace(/\D/g, '');
+            }
+            if (datos.verified_name && !document.getElementById('numEtiqueta').value) {
+                document.getElementById('numEtiqueta').value = datos.verified_name;
+            }
+        } else {
+            caja.style.background = 'rgba(239,68,68,0.08)';
+            caja.style.border = '1px solid rgba(239,68,68,0.25)';
+            caja.style.color = '#fca5a5';
+            caja.innerHTML = '❌ ' + escHtml(datos.error || 'Meta no respondió bien. Revisa token y Phone Number ID.');
+        }
+    } catch (err) {
+        if (err.message !== 'unauthorized') {
+            caja.style.display = 'block';
+            caja.style.color = '#fca5a5';
+            caja.innerHTML = '❌ Error de conexión con el servidor.';
+        }
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-plug-circle-check"></i> Probar conexión con Meta';
+    }
 }
 
 document.getElementById('formNumero').addEventListener('submit', async (e) => {
     e.preventDefault();
 
-    const empresaId = document.getElementById('selectorEmpresaNumeros').value;
+    // Usuario de empresa: SU empresa fija; el selector solo existe para superadmin.
+    const empresaId = esSuperadminUI()
+        ? document.getElementById('selectorEmpresaNumeros').value
+        : empresaIdActual();
     const telefono = document.getElementById('numTelefono').value.trim();
     const phone_number_id = document.getElementById('numPhoneId').value.trim();
+    const meta_token = document.getElementById('numToken').value.trim();
 
     if (!empresaId) { showToast('Selecciona una empresa', 'error'); return; }
     if (!telefono) { showToast('El teléfono es requerido', 'error'); return; }
@@ -1435,12 +1902,13 @@ document.getElementById('formNumero').addEventListener('submit', async (e) => {
         const res = await apiFetch('POST', `/api/admin/numeros/${empresaId}`, {
             telefono,
             phone_number_id,
-            etiqueta: document.getElementById('numEtiqueta').value.trim() || null
+            etiqueta: document.getElementById('numEtiqueta').value.trim() || null,
+            meta_token: meta_token || null
         });
 
         if (res.ok) {
             cerrarModal('modalNumero');
-            showToast('Número registrado ✓');
+            showToast('Número registrado ✓ El token quedó cifrado.');
             await cargarNumeros(empresaId);
         } else {
             const err = await res.json();
@@ -1454,12 +1922,20 @@ async function toggleNumero(id, activo) {
         const res = await apiFetch('PUT', `/api/admin/numeros/${id}`, { activo });
         if (res.ok) {
             showToast(activo ? 'Número activado ✓' : 'Número desactivado');
-            await cargarNumeros(document.getElementById('selectorEmpresaNumeros').value);
+            await cargarNumeros(empresaIdDeNumeros());
         } else {
             const err = await res.json();
             showToast(err.error || 'Error', 'error');
         }
     } catch (e) { if (e.message !== 'unauthorized') showToast('Error de conexión', 'error'); }
+}
+
+/** Empresa del contexto de la sección Números: la del selector si es
+ * superadmin, o la fija del usuario de empresa. */
+function empresaIdDeNumeros() {
+    return esSuperadminUI()
+        ? document.getElementById('selectorEmpresaNumeros').value
+        : empresaIdActual();
 }
 
 async function eliminarNumero(id, telefono) {
@@ -1468,7 +1944,7 @@ async function eliminarNumero(id, telefono) {
         const res = await apiFetch('DELETE', `/api/admin/numeros/${id}`);
         if (res.ok) {
             showToast('Número eliminado');
-            await cargarNumeros(document.getElementById('selectorEmpresaNumeros').value);
+            await cargarNumeros(empresaIdDeNumeros());
         } else {
             const err = await res.json();
             showToast(err.error || 'Error al eliminar', 'error');
@@ -1491,6 +1967,16 @@ const COLORES_ESTADO = {
 
 function poblarSelectorEmpresaCitas() {
     const sel = document.getElementById('selectorEmpresaCitas');
+    const propia = empresaIdActual();
+
+    // Usuario de empresa: cero selector, sus citas cargan directas.
+    if (!esSuperadminUI() && propia) {
+        sel.parentElement.style.display = 'none';
+        cargarCitas();
+        return;
+    }
+
+    sel.parentElement.style.display = 'block';
     sel.innerHTML = '<option value="">— Selecciona una empresa —</option>';
     empresasCache.forEach(e => {
         sel.innerHTML += `<option value="${e.id}">${escHtml(e.nombre)}</option>`;
@@ -1597,6 +2083,16 @@ function poblarSelectEmpresas(selectId, selectedId = null) {
     empresasCache.forEach(e => {
         sel.innerHTML += `<option value="${e.id}" ${selectedId === e.id ? 'selected' : ''}>${escHtml(e.nombre)}</option>`;
     });
+    // Un usuario de empresa no "elige" empresa: siempre la suya.
+    if (!esSuperadminUI()) {
+        const propia = empresaIdActual();
+        if (propia) {
+            sel.style.display = 'none';
+            sel.value = propia;
+        }
+    } else {
+        sel.style.display = '';
+    }
 }
 
 function abrirModal(id) {

@@ -56,11 +56,12 @@ async function resolverBot(displayPhoneNumber, phoneNumberIdMeta) {
     return row;
 }
 
-/** Lista los números de respuesta de una empresa. */
+/** Lista los números de una empresa. SIN el token: se devuelve solo la
+ * bandera "conectado"; una credencial de WhatsApp no viaja por la API. */
 async function listarPorEmpresa(empresaId) {
     const { data, error } = await supabase
         .from('numeros_bot')
-        .select('*')
+        .select('id, empresa_id, telefono, phone_number_id, etiqueta, activo, creado_en, meta_token_cifrado')
         .eq('empresa_id', empresaId)
         .order('creado_en');
 
@@ -68,7 +69,11 @@ async function listarPorEmpresa(empresaId) {
         console.error('Error listando números de la empresa:', error.message);
         return [];
     }
-    return data || [];
+    // El token sale del payload: lo que ve el panel es una bandera.
+    return (data || []).map(({ meta_token_cifrado, ...fila }) => ({
+        ...fila,
+        token_conectado: !!meta_token_cifrado
+    }));
 }
 
 /** Empresa a la que pertenece un número. */

@@ -4,6 +4,7 @@ const numeros = require('./numeros');
 const bot = require('./bot');
 const { firmarLink } = require('./auth');
 const { zonedToUtc } = require('./tiempo');
+const tokensMeta = require('./tokensMeta');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
@@ -631,7 +632,7 @@ async function createNumero(req, res) {
     try {
         if (!(await puedeOperarEmpresa(req, res, req.params.empresa_id))) return;
 
-        const { telefono, phone_number_id, etiqueta } = req.body || {};
+        const { telefono, phone_number_id, etiqueta, meta_token } = req.body || {};
 
         const telefonoNormalizado = numeros.normalizarTelefono(telefono);
         if (!telefonoNormalizado) {
@@ -640,17 +641,27 @@ async function createNumero(req, res) {
         if (!phone_number_id) {
             return fallo(res, 'El phone_number_id de Meta es requerido');
         }
+        if (meta_token !== undefined && (typeof meta_token !== 'string' || meta_token.trim().length < 20)) {
+            return fallo(res, 'El token de Meta recibido no parece válido (muy corto)');
+        }
+
+        const fila = {
+            empresa_id: req.params.empresa_id,
+            telefono: telefonoNormalizado,
+            phone_number_id,
+            etiqueta: etiqueta || null,
+            activo: true
+        };
+
+        // El token se guarda CIFRADO y jamás vuelve a salir por la API.
+        if (typeof meta_token === 'string' && meta_token.trim()) {
+            fila.meta_token_cifrado = tokensMeta.cifrar(meta_token.trim());
+        }
 
         const { data, error } = await supabase
             .from('numeros_bot')
-            .insert({
-                empresa_id: req.params.empresa_id,
-                telefono: telefonoNormalizado,
-                phone_number_id,
-                etiqueta: etiqueta || null,
-                activo: true
-            })
-            .select()
+            .insert(fila)
+            .select('id, empresa_id, telefono, phone_number_id, etiqueta, activo, creado_en, meta_token_cifrado')
             .single();
 
         if (error) {
@@ -660,10 +671,57 @@ async function createNumero(req, res) {
             throw error;
         }
 
+        const { meta_token_cifrado, ...visible } = data;
+        require('./whatsappCloud').limpiarCacheTokens(phone_number_id);
         numeros.limpiarCache();
-        res.status(201).json(data);
+        res.status(201).json({ ...visible, token_conectado: !!meta_token_cifrado });
     } catch (error) {
         servidorError(res, 'Error creando número', error);
+    }
+}
+
+/**
+ * Prueba un token+phone_number_id contra Graph ANTES de guardar el número.
+ * Devuelve el número real y el display name para que el wizard confirme
+ * con el cliente que conectó el número correcto.
+ */
+async function probarNumero(req, res) {
+    try {
+        if (!esSuperadmin(req) && !empresaPropia(req)) {
+            return res.status(403).json({ error: 'No tienes acceso a esta empresa' });
+        }
+
+        const { phone_number_id, meta_token } = req.body || {};
+        if (!phone_number_id || typeof phone_number_id !== 'string') {
+            return fallo(res, 'phone_number_id es requerido');
+        }
+        if (typeof meta_token !== 'string' || meta_token.trim().length < 20) {
+            return fallo(res, 'El token de Meta recibido no parece válido');
+        }
+
+        const respuesta = await fetch(`https://graph.facebook.com/v24.0/${encodeURIComponent(phone_number_id.trim())}?fields=display_phone_number,verified_name,quality_rating`, {
+            headers: { Authorization: `Bearer ${meta_token.trim()}` }
+        });
+        const datos = await respuesta.json().catch(() => ({}));
+
+        if (!respuesta.ok) {
+            const codigo = datos?.error?.code;
+            const mensaje = codigo === 190
+                ? 'El token es inválido o expiró (error 190 de Meta). Genera uno permanente y prueba de nuevo.'
+                : codigo === 200
+                    ? 'El token es válido pero NO tiene permisos sobre este número. Falta whatsapp_business_management.'
+                    : `Meta rechazó la prueba: ${datos?.error?.message || respuesta.status}`;
+            return res.status(400).json({ ok: false, error: mensaje });
+        }
+
+        res.json({
+            ok: true,
+            display_phone_number: datos.display_phone_number || null,
+            verified_name: datos.verified_name || null,
+            quality_rating: datos.quality_rating || null
+        });
+    } catch (error) {
+        servidorError(res, 'Error probando las credenciales de Meta', error);
     }
 }
 
@@ -672,7 +730,7 @@ async function updateNumero(req, res) {
         // El número identifica a qué empresa pertenece: permiso por ahí.
         const { data: numero } = await supabase
             .from('numeros_bot')
-            .select('id, empresa_id')
+            .select('id, empresa_id, phone_number_id')
             .eq('id', req.params.id)
             .maybeSingle();
 
@@ -681,18 +739,29 @@ async function updateNumero(req, res) {
 
         const updates = soloCampos(req.body, ['phone_number_id', 'etiqueta', 'activo']);
 
+        // Rotación de token: se cifra el nuevo y nunca se devuelve.
+        if (req.body?.meta_token !== undefined && req.body?.meta_token !== null && String(req.body.meta_token).trim() !== '') {
+            if (String(req.body.meta_token).trim().length < 20) {
+                return fallo(res, 'El token de Meta recibido no parece válido');
+            }
+            updates.meta_token_cifrado = tokensMeta.cifrar(String(req.body.meta_token).trim());
+        }
+
         const { data, error } = await supabase
             .from('numeros_bot')
             .update(updates)
             .eq('id', numero.id)
-            .select()
+            .select('id, empresa_id, telefono, phone_number_id, etiqueta, activo, creado_en, meta_token_cifrado')
             .single();
 
         if (error) throw error;
         if (!data) return fallo(res, 'Número no encontrado', 404);
 
+        const { meta_token_cifrado, ...visible } = data;
         numeros.limpiarCache();
-        res.json(data);
+        require('./whatsappCloud').limpiarCacheTokens(numero.phone_number_id);
+        if (updates.phone_number_id) require('./whatsappCloud').limpiarCacheTokens(updates.phone_number_id);
+        res.json({ ...visible, token_conectado: !!meta_token_cifrado });
     } catch (error) {
         servidorError(res, 'Error actualizando número', error);
     }
@@ -1278,6 +1347,7 @@ function setupAdminRoutes(app) {
 
     // Números de respuesta
     app.get('/api/admin/numeros/:empresa_id', requireAuth, getNumeros);
+    app.post('/api/admin/numeros/probar', requireAuth, probarNumero);
     app.post('/api/admin/numeros/:empresa_id', requireAuth, createNumero);
     app.put('/api/admin/numeros/:id', requireAuth, updateNumero);
     app.delete('/api/admin/numeros/:id', requireAuth, deleteNumero);
