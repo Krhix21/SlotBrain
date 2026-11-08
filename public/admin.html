@@ -1061,6 +1061,10 @@ async function cargarEmpresas() {
         const res = await apiFetch('GET', '/api/admin/empresas');
         empresasCache = await res.json();
         renderEmpresas();
+        // La vista "Mi Empresa" se alimenta del mismo caché; si nunca
+        // se llama a renderMiEmpresa, la pantalla del propietario se
+        // queda con el spinner para siempre (bug del piloto).
+        renderMiEmpresa();
     } catch (e) { if (e.message !== 'unauthorized') console.error(e); }
 }
 
