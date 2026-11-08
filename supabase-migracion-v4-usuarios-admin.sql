@@ -69,6 +69,13 @@ CREATE TRIGGER trigger_usuarios_admin_actualizado
     BEFORE UPDATE ON usuarios_admin FOR EACH ROW EXECUTE FUNCTION actualizar_timestamp();
 
 -- ════════════════════════════════════════════════════════════
+-- 4) Higiene de seguridad (lint de Supabase: search_path variable)
+--    Evita el secuestro de search_path en la función del trigger.
+-- ============================================================
+
+ALTER FUNCTION public.actualizar_timestamp SET search_path = 'public';
+
+-- ════════════════════════════════════════════════════════════
 -- 4) Comprobaciones
 --    Todas deben dar 0 filas:
 --
