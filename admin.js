@@ -125,7 +125,7 @@ async function login(req, res) {
 
     const { data: usuario, error } = await supabase
         .from('usuarios_admin')
-        .select('id, email, password_hash, rol, empresa_id, activo')
+        .select('id, email, password_hash, rol, empresa_id, activo, debe_cambiar_clave')
         .eq('email', email)
         .maybeSingle();
 
@@ -161,7 +161,8 @@ async function login(req, res) {
         token,
         usuario: usuario.email,
         rol: usuario.rol,
-        empresa_id: usuario.empresa_id
+        empresa_id: usuario.empresa_id,
+        debe_cambiar_clave: usuario.debe_cambiar_clave === true
     });
 }
 
@@ -283,7 +284,15 @@ async function createUsuario(req, res) {
         const { email, password, rol = 'staff', empresa_id } = req.body || {};
 
         if (!correoValido(email)) return fallo(res, 'Envía un correo válido');
-        if (typeof password !== 'string' || password.length < 8) {
+
+        // Sin password explícita se genera una temporal que el usuario DEBE cambiar.
+        let passwordFinal = password;
+        let usaClaveTemporal = false;
+
+        if (typeof password !== 'string' || password === '') {
+            passwordFinal = claveTemporal();
+            usaClaveTemporal = true;
+        } else if (password.length < 8) {
             return fallo(res, 'La contraseña debe tener al menos 8 caracteres');
         }
 
@@ -303,16 +312,22 @@ async function createUsuario(req, res) {
             .from('usuarios_admin')
             .insert({
                 email: String(email).trim().toLowerCase(),
-                password_hash: bcrypt.hashSync(password, 10),
+                password_hash: bcrypt.hashSync(passwordFinal, 10),
                 rol,
-                empresa_id: empresaId
+                empresa_id: empresaId,
+                debe_cambiar_clave: usaClaveTemporal
             })
-            .select('id, email, rol, empresa_id, activo, creado_en')
+            .select('id, email, rol, empresa_id, activo, creado_en, debe_cambiar_clave')
             .single();
 
         if (error) {
             if (error.code === '23505') return fallo(res, 'Ese correo ya tiene un usuario', 409);
             throw error;
+        }
+
+        // La clave temporal se muestra UNA vez, aquí; luego vive hasheada.
+        if (usaClaveTemporal) {
+            data.clave_temporal = passwordFinal;
         }
 
         res.status(201).json(data);
@@ -321,36 +336,50 @@ async function createUsuario(req, res) {
     }
 }
 
-/** Acepta: password (nueva), rol, activo. Correo e empresa no se tocan. */
+/** Acepta: password (nueva), password_actual (solo cambio propio), rol, activo, debe_cambiar_clave. */
 async function updateUsuario(req, res) {
     try {
-        const updates = soloCampos(req.body, ['password', 'rol', 'activo']);
+        const updates = soloCampos(req.body, ['password', 'rol', 'activo', 'debe_cambiar_clave']);
         if (Object.keys(updates).length === 0) {
             return fallo(res, 'No enviaste ningún campo editable');
         }
 
         const { data: usuario } = await supabase
             .from('usuarios_admin')
-            .select('id, email, rol, empresa_id')
+            .select('id, email, rol, empresa_id, password_hash')
             .eq('id', req.params.id)
             .maybeSingle();
 
         if (!usuario) return fallo(res, 'Usuario no encontrado', 404);
 
+        const esUnoMismo = req.usuario.id === usuario.id;
         const esStaffDeLaMismaEmpresa = !esSuperadmin(req)
             && usuario.empresa_id
-            && usuario.empresa_id === empresaPropia(req);
+            && usuario.empresa_id === empresaPropia(req)
+            && !esUnoMismo;
 
         if (usuario.rol === 'superadmin' && !esSuperadmin(req)) {
             return sinPermiso(res);
         }
-        if (!esSuperadmin(req) && !esStaffDeLaMismaEmpresa) {
+        if (!esSuperadmin(req) && !esStaffDeLaMismaEmpresa && !esUnoMismo) {
             return sinPermiso(res);
         }
 
         if (updates.password !== undefined) {
+            // Cambiar la PROPIA contraseña exige confirmar la actual:
+            // evita que una sesión ajena la rote con la sesión abierta.
+            if (esUnoMismo) {
+                const { password_actual } = req.body || {};
+                const correcta = typeof password_actual === 'string'
+                    && bcrypt.compareSync(password_actual, usuario.password_hash);
+                if (!correcta) {
+                    return fallo(res, 'Para cambiar tu contraseña debes confirmar la actual', 403);
+                }
+                // Ya dejaron de ser una clave temporal: se desmarca.
+                updates.debe_cambiar_clave = false;
+            }
             if (typeof updates.password !== 'string' || updates.password.length < 8) {
-                return fallo(res, 'La contraseña debe tener al menos 8 caracteres');
+                return fallo(res, 'La contraseña nueva debe tener al menos 8 caracteres');
             }
             updates.password_hash = bcrypt.hashSync(updates.password, 10);
             delete updates.password;
@@ -373,7 +402,7 @@ async function updateUsuario(req, res) {
             .from('usuarios_admin')
             .update(updates)
             .eq('id', usuario.id)
-            .select('id, email, rol, empresa_id, activo')
+            .select('id, email, rol, empresa_id, activo, debe_cambiar_clave')
             .single();
 
         if (error) throw error;
@@ -466,8 +495,15 @@ function servidorError(res, contexto, error) {
 const CAMPOS_EMPRESA = [
     'nombre', 'descripcion', 'telefono', 'direccion',
     'zona_horaria', 'horario', 'slot_minutos',
-    'mensaje_bienvenida', 'mensaje_confirmacion'
+    'mensaje_bienvenida', 'mensaje_confirmacion',
+    'logo_url', 'color_primario', 'moneda',
+    'terminologia', 'prompt_base', 'politicas'
 ];
+
+/** Clave temporal para el usuario de una empresa nueva. */
+function claveTemporal() {
+    return crypto.randomBytes(6).toString('base64url'); // 8 caracteres
+}
 
 async function getEmpresas(req, res) {
     try {
@@ -493,13 +529,57 @@ async function createEmpresa(req, res) {
 
         if (!updates.nombre) return fallo(res, 'El nombre de la empresa es requerido');
 
+        // El usuario propietario se crea junto con la empresa: si manda
+        // admin_email, y no manda admin_password, se genera una clave
+        // temporal que el propietario DEBE cambiar en su primer login.
+        const admin_email = req.body?.admin_email;
+        const admin_password = req.body?.admin_password;
+        let claveTemporalPropietario = null;
+
+        if (admin_email !== undefined && admin_email !== null && String(admin_email).trim() !== '') {
+            if (!correoValido(admin_email)) {
+                return fallo(res, 'admin_email no es un correo válido');
+            }
+            if (admin_password !== undefined && admin_password !== null) {
+                if (typeof admin_password !== 'string' || admin_password.length < 8) {
+                    return fallo(res, 'admin_password debe tener al menos 8 caracteres');
+                }
+            }
+            claveTemporalPropietario = admin_password || claveTemporal();
+        }
+
         updates.zona_horaria = updates.zona_horaria || 'America/Bogota';
         updates.slot_minutos = updates.slot_minutos || 30;
+        updates.moneda = updates.moneda || 'COP';
 
-        const { data, error } = await supabase.from('empresas').insert(updates).select().single();
+        const { data: empresa, error } = await supabase.from('empresas').insert(updates).select().single();
         if (error) throw error;
 
-        res.status(201).json(data);
+        if (claveTemporalPropietario) {
+            const { data: usuario, error: errU } = await supabase
+                .from('usuarios_admin')
+                .insert({
+                    email: String(admin_email).trim().toLowerCase(),
+                    password_hash: bcrypt.hashSync(claveTemporalPropietario, 10),
+                    rol: 'propietario',
+                    empresa_id: empresa.id,
+                    debe_cambiar_clave: true
+                })
+                .select('id, email, rol, empresa_id, activo, creado_en')
+                .single();
+
+            if (errU) {
+                // La empresa ya existe: no se pierde, se informa el fallo del usuariot.
+                return res.status(201).json({ ...empresa, usuario_error: errU.message });
+            }
+
+            return res.status(201).json({
+                ...empresa,
+                usuario_creado: { ...usuario, clave_temporal: claveTemporalPropietario }
+            });
+        }
+
+        res.status(201).json(empresa);
     } catch (error) {
         servidorError(res, 'Error creando empresa', error);
     }

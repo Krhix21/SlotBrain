@@ -9,6 +9,7 @@ const { setupAdminRoutes } = require('./admin');
 const botState = require('./botState');
 const bot = require('./bot');
 const numeros = require('./numeros');
+const notificaciones = require('./notificaciones');
 
 const app = express();
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
@@ -218,4 +219,5 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 Servidor escuchando en el puerto ${PORT}`);
     bot.iniciar();
+    notificaciones.iniciar();
 });
