@@ -37,7 +37,7 @@ app.get('/health', async (req, res) => {
 });
 
 app.get('/', (req, res) => {
-    res.send('Bot de WhatsApp con Meta Cloud API activo 💈');
+    res.send('SlotBrain — bot de citas por WhatsApp activo 💈');
 });
 
 // ============================================================

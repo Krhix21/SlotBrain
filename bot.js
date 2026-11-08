@@ -732,7 +732,7 @@ async function extraerNombre(texto) {
 // ============================================================
 
 async function iniciar() {
-    console.log('📱 Bot de WhatsApp (Meta Cloud API) iniciado.');
+    console.log('📱 SlotBrain (bot de citas por WhatsApp, Meta Cloud API) iniciado.');
 
     if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
         console.error('❌ Faltan SUPABASE_URL o SUPABASE_KEY.');

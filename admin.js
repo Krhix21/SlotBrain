@@ -7,83 +7,421 @@ const { firmarLink } = require('./auth');
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 // ============================================================
-// Sesiones
+// Usuarios y sesiones del panel (multitenant)
 //
-// En memoria: se pierden en cada deploy de Render, lo cual obliga a
-// volver a entrar. Para un panel de un solo operador es aceptable; si
-// hubiera varios, esto debería ir a una tabla o a Redis.
+// Cada usuario pertenece a una empresa (`usuarios_admin`). Las sesiones
+// viven en la tabla `sesiones_admin` (antes estaban en memoria del
+// proceso y se perdían en cada deploy de Render).
+//
+// Superadmin: empresa_id NULL, ve todas las empresas (para operar la
+// plataforma). Sin superadmin definido todavía, el primer arranque crea
+// uno desde ADMIN_USER/ADMIN_PASSWORD del entorno.
 // ============================================================
-const sessions = new Map();
+const bcrypt = require('bcryptjs');
+
 const SESSION_TTL = 8 * 60 * 60 * 1000;
 
 function generarToken() {
     return crypto.randomBytes(32).toString('hex');
 }
 
-function limpiarSesionesVencidas() {
-    const ahora = Date.now();
-    for (const [token, expira] of sessions) {
-        if (ahora > expira) sessions.delete(token);
+/** Crea el superadmin inicial desde ADMIN_USER/ADMIN_PASSWORD si la tabla está vacía. */
+async function prepararUsuarioInicial() {
+    if (!process.env.ADMIN_USER || !process.env.ADMIN_PASSWORD) return;
+
+    const { count, error } = await supabase
+        .from('usuarios_admin')
+        .select('id', { count: 'exact', head: true });
+
+    if (error) {
+        console.error('❌ No se pudo contar usuarios_admin (¿ejecutaste la migración v4?):', error.message);
+        return;
     }
+    if (count > 0) return;
+
+    // Si el ADMIN_USER no es un correo, se le da forma de correo interno.
+    let email = process.env.ADMIN_USER.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+        email = `${email.replace(/[^a-z0-9._-]/g, '')}@slotbrain.local`;
+    }
+
+    const { error: errIns } = await supabase.from('usuarios_admin').insert({
+        email,
+        password_hash: bcrypt.hashSync(process.env.ADMIN_PASSWORD, 10),
+        rol: 'superadmin',
+        empresa_id: null
+    });
+
+    if (errIns && errIns.code !== '23505') {
+        console.error('❌ No se pudo crear el superadmin inicial:', errIns.message);
+        return;
+    }
+    console.log(`✅ Superadmin inicial creado desde ADMIN_USER: ${email}`);
 }
 
-function requireAuth(req, res, next) {
+async function requireAuth(req, res, next) {
     const auth = req.headers.authorization;
     if (!auth || !auth.startsWith('Bearer ')) {
         return res.status(401).json({ error: 'No autorizado' });
     }
 
-    const token = auth.slice(7);
-    const expira = sessions.get(token);
+    const token = auth.slice('Bearer '.length);
+    if (!/^[a-f0-9]{64}$/i.test(token)) {
+        return res.status(401).json({ error: 'Sesión inválida' });
+    }
 
-    if (!expira || Date.now() > expira) {
-        sessions.delete(token);
+    const { data: sesion, error } = await supabase
+        .from('sesiones_admin')
+        .select('token, expira, usuarios_admin (id, email, empresa_id, rol, activo)')
+        .eq('token', token)
+        .maybeSingle();
+
+    if (error) {
+        console.error('❌ Error consultando la sesión:', error.message);
+        return res.status(500).json({ error: 'Error interno del servidor' });
+    }
+
+    if (sesion && new Date(sesion.expira).getTime() <= Date.now()) {
+        await supabase.from('sesiones_admin').delete().eq('token', token);
         return res.status(401).json({ error: 'Sesión expirada' });
     }
+
+    const usuario = Array.isArray(sesion?.usuarios_admin) ? sesion.usuarios_admin[0] : sesion?.usuarios_admin;
+    if (!sesion || !usuario || !usuario.activo) {
+        return res.status(401).json({ error: 'Sesión expirada' });
+    }
+
+    req.token = token;
+    req.usuario = {
+        id: usuario.id,
+        email: usuario.email,
+        empresa_id: usuario.empresa_id,
+        rol: usuario.rol
+    };
     next();
 }
 
 async function login(req, res) {
-    const { usuario, password } = req.body || {};
-
-    if (!process.env.ADMIN_USER || !process.env.ADMIN_PASSWORD) {
-        console.error('❌ Faltan ADMIN_USER o ADMIN_PASSWORD. El panel queda bloqueado.');
-        return res.status(503).json({ error: 'El panel no está configurado: faltan ADMIN_USER o ADMIN_PASSWORD.' });
-    }
+    const body = req.body || {};
+    const password = typeof body.password === 'string' ? body.password : '';
 
     // Frena la fuerza bruta a costa de 500 ms por intento.
     await new Promise(r => setTimeout(r, 500));
 
-    const usuarioOk = comparar(req.body?.usuario, process.env.ADMIN_USER);
-    const passOk = comparar(password, process.env.ADMIN_PASSWORD);
+    await prepararUsuarioInicial();
 
-    if (!usuarioOk || !passOk) {
-        console.warn(`⚠️  Intento de login fallido para "${usuario}".`);
+    const email = String(body.email || body.usuario || '').trim().toLowerCase();
+    if (!email) return res.status(400).json({ error: 'Envía tu correo y contraseña' });
+
+    const { data: usuario, error } = await supabase
+        .from('usuarios_admin')
+        .select('id, email, password_hash, rol, empresa_id, activo')
+        .eq('email', email)
+        .maybeSingle();
+
+    if (error) {
+        console.error('❌ Error buscando el usuario:', error.message);
+        return res.status(500).json({ error: 'Error interno del servidor' });
+    }
+
+    const credencialesOk = usuario && usuario.activo
+        && bcrypt.compareSync(password, usuario.password_hash);
+
+    if (!credencialesOk) {
+        console.warn(`⚠️  Intento de login fallido para "${email}".`);
         return res.status(401).json({ error: 'Credenciales incorrectas' });
     }
 
     const token = generarToken();
-    sessions.set(token, Date.now() + SESSION_TTL);
-    res.json({ token, usuario: process.env.ADMIN_USER });
+    const expira = new Date(Date.now() + SESSION_TTL).toISOString();
+
+    const { error: errSesion } = await supabase.from('sesiones_admin').insert({
+        token,
+        usuario_id: usuario.id,
+        empresa_id: usuario.empresa_id,
+        expira
+    });
+
+    if (errSesion) {
+        console.error('❌ Error creando la sesión:', errSesion.message);
+        return res.status(500).json({ error: 'Error interno del servidor' });
+    }
+
+    res.json({
+        token,
+        usuario: usuario.email,
+        rol: usuario.rol,
+        empresa_id: usuario.empresa_id
+    });
 }
 
-function logout(req, res) {
-    const token = req.headers.authorization?.slice(7);
-    if (token) sessions.delete(token);
+async function logout(req, res) {
+    if (req.token) {
+        await supabase.from('sesiones_admin').delete().eq('token', req.token);
+    }
     res.json({ ok: true });
 }
 
 function validateSession(req, res) {
-    res.json({ valid: true });
+    res.json({ valid: true, usuario: req.usuario.email, rol: req.usuario.rol, empresa_id: req.usuario.empresa_id });
 }
 
-/** Comparación de longitud fija para no filtrar nada por tiempo de respuesta. */
-function comparar(a, b) {
-    if (typeof a !== 'string' || typeof b !== 'string') return false;
-    const bufA = Buffer.from(a);
-    const bufB = Buffer.from(b);
-    return bufA.length === bufB.length && crypto.timingSafeEqual(bufA, bufB);
+// ============================================================
+// Scoping multi-tenant
+//
+// Regla: las peticiones de un usuario de empresa solo tocan SU empresa.
+// El superadmin (rol 'superadmin') puede operar cualquiera.
+// ============================================================
+
+function esSuperadmin(req) {
+    return req.usuario.rol === 'superadmin';
 }
+
+function empresaPropia(req) {
+    return req.usuario.empresa_id;
+}
+
+/** middleware por-empresa: permite params de superadmin, fuerza los demás */
+function conEmpresaPropia(req) {
+    return esSuperadmin(req) ? null : empresaPropia(req);
+}
+
+function sinPermiso(res) {
+    return res.status(403).json({ error: 'No tienes acceso a esta empresa' });
+}
+
+/** ¿El usuario puede operar esta empresa? false ⇒ ya respondió 403 o 404. */
+async function puedeOperarEmpresa(req, res, empresaId) {
+    if (!empresaId) {
+        res.status(400).json({ error: 'Falta la empresa' });
+        return false;
+    }
+    if (esSuperadmin(req)) return true;
+    if (empresaId === empresaPropia(req)) return true;
+    sinPermiso(res);
+    return false;
+}
+
+/** Fila de trabajador con su empresa (para validar permisos). */
+async function trabajadorSeguro(trabajadorId, columnas = 'id, empresa_id, nombre') {
+    const { data } = await supabase
+        .from('trabajadores')
+        .select(columnas)
+        .eq('id', trabajadorId)
+        .maybeSingle();
+    return data || null;
+}
+
+/** Ids de trabajadores de una empresa (para filtrar tablas sin empresa_id). */
+async function idsTrabajadoresDe(empresaId) {
+    const { data } = await supabase
+        .from('trabajadores')
+        .select('id')
+        .eq('empresa_id', empresaId);
+    return (data || []).map(t => t.id);
+}
+
+/** ¿El usuario puede operar este trabajador? false ⇒ ya respondió. */
+async function puedeOperarTrabajador(req, res, trabajadorId) {
+    const trabajador = await trabajadorSeguro(trabajadorId);
+    if (!trabajador) {
+        res.status(404).json({ error: 'Trabajador no encontrado' });
+        return false;
+    }
+    if (esSuperadmin(req) || trabajador.empresa_id === empresaPropia(req)) {
+        return true;
+    }
+    sinPermiso(res);
+    return false;
+}
+
+// ============================================================
+// Gestión de usuarios (propietario o superadmin)
+// ============================================================
+
+const ROLES_DE_EMPRESA = ['propietario', 'staff'];
+
+function correoValido(email) {
+    return typeof email === 'string'
+        && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim().toLowerCase());
+}
+
+async function getUsuarios(req, res) {
+    try {
+        let consulta = supabase
+            .from('usuarios_admin')
+            .select('id, email, rol, empresa_id, activo, creado_en')
+            .order('creado_en');
+
+        if (esSuperadmin(req)) {
+            if (req.query.empresa_id) consulta = consulta.eq('empresa_id', req.query.empresa_id);
+        } else {
+            consulta = consulta.eq('empresa_id', empresaPropia(req));
+        }
+
+        const { data, error } = await consulta;
+        if (error) throw error;
+
+        res.json(data);
+    } catch (error) {
+        servidorError(res, 'Error obteniendo usuarios', error);
+    }
+}
+
+async function createUsuario(req, res) {
+    try {
+        const { email, password, rol = 'staff', empresa_id } = req.body || {};
+
+        if (!correoValido(email)) return fallo(res, 'Envía un correo válido');
+        if (typeof password !== 'string' || password.length < 8) {
+            return fallo(res, 'La contraseña debe tener al menos 8 caracteres');
+        }
+
+        let empresaId = null;
+
+        if (rol === 'superadmin') {
+            if (!esSuperadmin(req)) return fallo(res, 'Solo un superadmin puede crear superadmins', 403);
+        } else {
+            if (!ROLES_DE_EMPRESA.includes(rol)) {
+                return fallo(res, `Rol inválido. Valores permitidos: ${ROLES_DE_EMPRESA.join(', ')}`);
+            }
+            empresaId = esSuperadmin(req) ? (empresa_id || null) : empresaPropia(req);
+            if (!empresaId) return fallo(res, 'empresa_id es requerido');
+        }
+
+        const { data, error } = await supabase
+            .from('usuarios_admin')
+            .insert({
+                email: String(email).trim().toLowerCase(),
+                password_hash: bcrypt.hashSync(password, 10),
+                rol,
+                empresa_id: empresaId
+            })
+            .select('id, email, rol, empresa_id, activo, creado_en')
+            .single();
+
+        if (error) {
+            if (error.code === '23505') return fallo(res, 'Ese correo ya tiene un usuario', 409);
+            throw error;
+        }
+
+        res.status(201).json(data);
+    } catch (error) {
+        servidorError(res, 'Error creando usuario', error);
+    }
+}
+
+/** Acepta: password (nueva), rol, activo. Correo e empresa no se tocan. */
+async function updateUsuario(req, res) {
+    try {
+        const updates = soloCampos(req.body, ['password', 'rol', 'activo']);
+        if (Object.keys(updates).length === 0) {
+            return fallo(res, 'No enviaste ningún campo editable');
+        }
+
+        const { data: usuario } = await supabase
+            .from('usuarios_admin')
+            .select('id, email, rol, empresa_id')
+            .eq('id', req.params.id)
+            .maybeSingle();
+
+        if (!usuario) return fallo(res, 'Usuario no encontrado', 404);
+
+        const esStaffDeLaMismaEmpresa = !esSuperadmin(req)
+            && usuario.empresa_id
+            && usuario.empresa_id === empresaPropia(req);
+
+        if (usuario.rol === 'superadmin' && !esSuperadmin(req)) {
+            return sinPermiso(res);
+        }
+        if (!esSuperadmin(req) && !esStaffDeLaMismaEmpresa) {
+            return sinPermiso(res);
+        }
+
+        if (updates.password !== undefined) {
+            if (typeof updates.password !== 'string' || updates.password.length < 8) {
+                return fallo(res, 'La contraseña debe tener al menos 8 caracteres');
+            }
+            updates.password_hash = bcrypt.hashSync(updates.password, 10);
+            delete updates.password;
+        }
+
+        if (updates.rol !== undefined) {
+            const rolesPermitidos = esSuperadmin(req)
+                ? [...ROLES_DE_EMPRESA, 'superadmin']
+                : ROLES_DE_EMPRESA;
+            if (!rolesPermitidos.includes(updates.rol)) {
+                return fallo(res, `Rol inválido. Valores permitidos: ${rolesPermitidos.join(', ')}`);
+            }
+        }
+
+        if (updates.activo === false && req.usuario.id === usuario.id) {
+            return fallo(res, 'No puedes desactivar tu propio usuario');
+        }
+
+        const { data, error } = await supabase
+            .from('usuarios_admin')
+            .update(updates)
+            .eq('id', usuario.id)
+            .select('id, email, rol, empresa_id, activo')
+            .single();
+
+        if (error) throw error;
+
+        // Al desactivar o bajar de rol, se cierran sus sesiones vivas.
+        if (updates.activo === false) {
+            await supabase.from('sesiones_admin').delete().eq('usuario_id', usuario.id);
+        }
+
+        res.json(data);
+    } catch (error) {
+        servidorError(res, 'Error actualizando usuario', error);
+    }
+}
+
+async function deleteUsuario(req, res) {
+    try {
+        const { data: usuario } = await supabase
+            .from('usuarios_admin')
+            .select('id, email, rol, empresa_id')
+            .eq('id', req.params.id)
+            .maybeSingle();
+
+        if (!usuario) return fallo(res, 'Usuario no encontrado', 404);
+        if (usuario.rol === 'superadmin' && !esSuperadmin(req)) return sinPermiso(res);
+        if (!esSuperadmin(req) && usuario.empresa_id !== empresaPropia(req)) return sinPermiso(res);
+
+        if (usuario.id === req.usuario.id) {
+            return fallo(res, 'No puedes eliminar tu propio usuario');
+        }
+
+        // No dejar a la empresa sin usuarios activos.
+        if (usuario.empresa_id) {
+            const { data: activos } = await supabase
+                .from('usuarios_admin')
+                .select('id, activo')
+                .eq('empresa_id', usuario.empresa_id);
+
+            const activosVivos = (activos || []).filter(u => u.activo && u.id !== usuario.id);
+            if (activosVivos.length === 0) {
+                return fallo(res, 'No puedes dejar la empresa sin usuarios: crea otro o reactiva uno antes.');
+            }
+        }
+
+        await supabase.from('sesiones_admin').delete().eq('usuario_id', usuario.id);
+
+        const { error } = await supabase.from('usuarios_admin').delete().eq('id', usuario.id);
+        if (error) throw error;
+
+        res.json({ ok: true });
+    } catch (error) {
+        servidorError(res, 'Error eliminando usuario', error);
+    }
+}
+
+// ============================================================
+// Utilidades
+// ============================================================
 
 // ============================================================
 // Utilidades
@@ -123,7 +461,11 @@ const CAMPOS_EMPRESA = [
 
 async function getEmpresas(req, res) {
     try {
-        const { data, error } = await supabase.from('empresas').select('*').order('nombre');
+        let consulta = supabase.from('empresas').select('*').order('nombre');
+        // Un usuario de empresa solo ve la suya; el superadmin ve todas.
+        if (!esSuperadmin(req)) consulta = consulta.eq('id', empresaPropia(req));
+
+        const { data, error } = await consulta;
         if (error) throw error;
         res.json(data);
     } catch (error) {
@@ -133,6 +475,10 @@ async function getEmpresas(req, res) {
 
 async function createEmpresa(req, res) {
     try {
+        if (!esSuperadmin(req)) {
+            return res.status(403).json({ error: 'Solo un superadmin puede crear empresas' });
+        }
+
         const updates = soloCampos(req.body, CAMPOS_EMPRESA);
 
         if (!updates.nombre) return fallo(res, 'El nombre de la empresa es requerido');
@@ -151,6 +497,8 @@ async function createEmpresa(req, res) {
 
 async function updateEmpresa(req, res) {
     try {
+        if (!(await puedeOperarEmpresa(req, res, req.params.id))) return;
+
         const updates = soloCampos(req.body, CAMPOS_EMPRESA);
 
         if (Object.keys(updates).length === 0) {
@@ -180,6 +528,7 @@ async function updateEmpresa(req, res) {
 
 async function getNumeros(req, res) {
     try {
+        if (!(await puedeOperarEmpresa(req, res, req.params.empresa_id))) return;
         const lista = await numeros.listarPorEmpresa(req.params.empresa_id);
         res.json(lista);
     } catch (error) {
@@ -189,6 +538,8 @@ async function getNumeros(req, res) {
 
 async function createNumero(req, res) {
     try {
+        if (!(await puedeOperarEmpresa(req, res, req.params.empresa_id))) return;
+
         const { telefono, phone_number_id, etiqueta } = req.body || {};
 
         const telefonoNormalizado = numeros.normalizarTelefono(telefono);
@@ -227,12 +578,22 @@ async function createNumero(req, res) {
 
 async function updateNumero(req, res) {
     try {
+        // El número identifica a qué empresa pertenece: permiso por ahí.
+        const { data: numero } = await supabase
+            .from('numeros_bot')
+            .select('id, empresa_id')
+            .eq('id', req.params.id)
+            .maybeSingle();
+
+        if (!numero) return fallo(res, 'Número no encontrado', 404);
+        if (!(await puedeOperarEmpresa(req, res, numero.empresa_id))) return;
+
         const updates = soloCampos(req.body, ['phone_number_id', 'etiqueta', 'activo']);
 
         const { data, error } = await supabase
             .from('numeros_bot')
             .update(updates)
-            .eq('id', req.params.id)
+            .eq('id', numero.id)
             .select()
             .single();
 
@@ -248,15 +609,21 @@ async function updateNumero(req, res) {
 
 async function deleteNumero(req, res) {
     try {
-        const { data, error } = await supabase
+        const { data: numero } = await supabase
+            .from('numeros_bot')
+            .select('id, empresa_id')
+            .eq('id', req.params.id)
+            .maybeSingle();
+
+        if (!numero) return fallo(res, 'Número no encontrado', 404);
+        if (!(await puedeOperarEmpresa(req, res, numero.empresa_id))) return;
+
+        const { error } = await supabase
             .from('numeros_bot')
             .delete()
-            .eq('id', req.params.id)
-            .select()
-            .single();
+            .eq('id', numero.id);
 
         if (error) throw error;
-        if (!data) return fallo(res, 'Número no encontrado', 404);
 
         numeros.limpiarCache();
         res.json({ ok: true });
@@ -283,7 +650,9 @@ async function getTrabajadores(req, res) {
             .select('id, nombre, empresa_id, telefono, correo, horario, slot_minutos, orden, activo, creado_en')
             .order('orden');
 
-        if (req.query.empresa_id) consulta = consulta.eq('empresa_id', req.query.empresa_id);
+        // El superadmin filtra por query; un usuario de empresa siempre ve la suya.
+        const filtroEmpresa = conEmpresaPropia(req) || req.query.empresa_id;
+        if (filtroEmpresa) consulta = consulta.eq('empresa_id', filtroEmpresa);
 
         const { data, error } = await consulta;
         if (error) throw error;
@@ -297,6 +666,10 @@ async function getTrabajadores(req, res) {
 async function createTrabajador(req, res) {
     try {
         const updates = soloCampos(req.body, CAMPOS_TRABAJADOR);
+
+        // Un usuario de empresa solo crea trabajadores en SU empresa, pase
+        // lo que pase en el body (el cliente puede mentir: se sobreescribe).
+        if (!esSuperadmin(req)) updates.empresa_id = empresaPropia(req);
 
         if (!updates.empresa_id) return fallo(res, 'empresa_id es requerido');
         if (!updates.nombre) return fallo(res, 'nombre es requerido');
@@ -315,6 +688,8 @@ async function createTrabajador(req, res) {
 
 async function updateTrabajador(req, res) {
     try {
+        if (!(await puedeOperarTrabajador(req, res, req.params.id))) return;
+
         const updates = soloCampos(req.body, CAMPOS_TRABAJADOR);
 
         if (Object.keys(updates).length === 0) {
@@ -340,6 +715,8 @@ async function updateTrabajador(req, res) {
 /** Genera el link firmado para que un trabajador enlace SU calendario. */
 async function linkCalendar(req, res) {
     try {
+        if (!(await puedeOperarTrabajador(req, res, req.params.id))) return;
+
         const { data: trabajador, error } = await supabase
             .from('trabajadores')
             .select('id, nombre, correo')
@@ -365,6 +742,8 @@ async function linkCalendar(req, res) {
 
 async function desconectarCalendar(req, res) {
     try {
+        if (!(await puedeOperarTrabajador(req, res, req.params.id))) return;
+
         const { data, error } = await supabase
             .from('trabajadores')
             .update({ refresh_token: null, correo: null })
@@ -387,6 +766,8 @@ async function desconectarCalendar(req, res) {
 
 async function getServiciosDeTrabajador(req, res) {
     try {
+        if (!(await puedeOperarTrabajador(req, res, req.params.id))) return;
+
         const { data, error } = await supabase
             .from('servicios_trabajadores')
             .select('servicio_id')
@@ -413,6 +794,8 @@ async function setServiciosDeTrabajador(req, res) {
         }
 
         const trabajadorId = req.params.id;
+
+        if (!(await puedeOperarTrabajador(req, res, trabajadorId))) return;
 
         const { data: trabajador, error: errT } = await supabase
             .from('trabajadores')
@@ -472,7 +855,22 @@ async function getBloqueos(req, res) {
     try {
         let consulta = supabase.from('bloqueos').select('*').order('fecha');
 
-        if (req.query.trabajador_id) consulta = consulta.eq('trabajador_id', req.query.trabajador_id);
+        if (esSuperadmin(req)) {
+            if (req.query.trabajador_id) consulta = consulta.eq('trabajador_id', req.query.trabajador_id);
+        } else {
+            // La tabla bloqueos no tiene empresa_id: se filtra por los
+            // trabajadores de la empresa del usuario.
+            const ids = await idsTrabajadoresDe(empresaPropia(req));
+            if (ids.length === 0) return res.json([]);
+
+            consulta = consulta.in('trabajador_id', ids);
+            if (req.query.trabajador_id) {
+                if (!ids.includes(req.query.trabajador_id)) {
+                    return sinPermiso(res);
+                }
+                consulta = consulta.eq('trabajador_id', req.query.trabajador_id);
+            }
+        }
         if (req.query.fecha) consulta = consulta.eq('fecha', req.query.fecha);
 
         const { data, error } = await consulta;
@@ -488,7 +886,8 @@ async function createBloqueo(req, res) {
     try {
         const { trabajador_id, fecha, hora_inicio, hora_fin, motivo } = req.body || {};
 
-        if (!trabajador_id) return fallo(res, 'trabajador_id es requerido');
+        if (!(await puedeOperarTrabajador(req, res, trabajador_id))) return;
+
         if (!fecha || !/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
             return fallo(res, 'La fecha es requerida en formato AAAA-MM-DD');
         }
@@ -519,7 +918,17 @@ async function createBloqueo(req, res) {
 
 async function deleteBloqueo(req, res) {
     try {
-        const { error } = await supabase.from('bloqueos').delete().eq('id', req.params.id);
+        // El bloqueo no sabe de empresas: se valida por su trabajador.
+        const { data: bloqueo } = await supabase
+            .from('bloqueos')
+            .select('id, trabajador_id')
+            .eq('id', req.params.id)
+            .maybeSingle();
+
+        if (!bloqueo) return fallo(res, 'Bloqueo no encontrado', 404);
+        if (!(await puedeOperarTrabajador(req, res, bloqueo.trabajador_id))) return;
+
+        const { error } = await supabase.from('bloqueos').delete().eq('id', bloqueo.id);
         if (error) throw error;
         res.json({ ok: true });
     } catch (error) {
@@ -535,6 +944,8 @@ const CAMPOS_SERVICIO = ['nombre', 'descripcion', 'precio', 'duracion_minutos', 
 
 async function getServiciosByEmpresa(req, res) {
     try {
+        if (!(await puedeOperarEmpresa(req, res, req.params.empresa_id))) return;
+
         const incluirInactivos = req.query.todos === 'true';
 
         let consulta = supabase.from('servicios').select('*').eq('empresa_id', req.params.empresa_id);
@@ -552,6 +963,9 @@ async function getServiciosByEmpresa(req, res) {
 async function createServicio(req, res) {
     try {
         const updates = soloCampos(req.body, [...CAMPOS_SERVICIO, 'empresa_id']);
+
+        // Un usuario de empresa crea servicios solo en la suya.
+        if (!esSuperadmin(req)) updates.empresa_id = empresaPropia(req);
 
         if (!updates.empresa_id) return fallo(res, 'empresa_id es requerido');
         if (!updates.nombre) return fallo(res, 'nombre es requerido');
@@ -574,6 +988,16 @@ async function createServicio(req, res) {
 
 async function updateServicio(req, res) {
     try {
+        const { data: servicio } = await supabase
+            .from('servicios')
+            .select('id, empresa_id')
+            .eq('id', req.params.id)
+            .maybeSingle();
+
+        if (!servicio) return fallo(res, 'Servicio no encontrado', 404);
+        if (!(await puedeOperarEmpresa(req, res, servicio.empresa_id))) return;
+
+        // La empresa de un servicio no se mueve desde el panel.
         const updates = soloCampos(req.body, CAMPOS_SERVICIO);
 
         if (Object.keys(updates).length === 0) {
@@ -583,7 +1007,7 @@ async function updateServicio(req, res) {
         const { data, error } = await supabase
             .from('servicios')
             .update(updates)
-            .eq('id', req.params.id)
+            .eq('id', servicio.id)
             .select()
             .single();
 
@@ -599,15 +1023,21 @@ async function updateServicio(req, res) {
 
 async function deleteServicio(req, res) {
     try {
-        const { data, error } = await supabase
+        const { data: servicio } = await supabase
+            .from('servicios')
+            .select('id, empresa_id')
+            .eq('id', req.params.id)
+            .maybeSingle();
+
+        if (!servicio) return fallo(res, 'Servicio no encontrado', 404);
+        if (!(await puedeOperarEmpresa(req, res, servicio.empresa_id))) return;
+
+        const { error } = await supabase
             .from('servicios')
             .update({ activo: false })
-            .eq('id', req.params.id)
-            .select()
-            .single();
+            .eq('id', servicio.id);
 
         if (error) throw error;
-        if (!data) return fallo(res, 'Servicio no encontrado', 404);
 
         bot.limpiarCacheConfiguracion();
         res.json({ ok: true });
@@ -629,6 +1059,8 @@ const CAMPOS_CITA_MANUAL = [
 
 async function getCitasByEmpresa(req, res) {
     try {
+        if (!(await puedeOperarEmpresa(req, res, req.params.empresa_id))) return;
+
         const { estado, fecha_desde, fecha_hasta, trabajador_id } = req.query;
 
         let consulta = supabase
@@ -654,6 +1086,14 @@ async function getCitasByEmpresa(req, res) {
 async function createCita(req, res) {
     try {
         const updates = soloCampos(req.body, CAMPOS_CITA_MANUAL);
+
+        // Un usuario de empresa crea citas solo en la suya, y el
+        // profesional tiene que ser de esa misma empresa.
+        if (!esSuperadmin(req)) updates.empresa_id = empresaPropia(req);
+
+        if (!(await puedeOperarEmpresa(req, res, updates.empresa_id))) return;
+        if (updates.trabajador_id
+            && !(await puedeOperarTrabajador(req, res, updates.trabajador_id))) return;
 
         if (!updates.empresa_id) return fallo(res, 'empresa_id es requerido');
         if (!updates.trabajador_id) return fallo(res, 'trabajador_id es requerido');
@@ -682,10 +1122,19 @@ async function updateCitaEstado(req, res) {
             return fallo(res, `Estado inválido. Valores permitidos: ${ESTADOS_CITA.join(', ')}`);
         }
 
+        const { data: cita } = await supabase
+            .from('citas')
+            .select('id, empresa_id, estado')
+            .eq('id', req.params.id)
+            .maybeSingle();
+
+        if (!cita) return fallo(res, 'Cita no encontrada', 404);
+        if (!(await puedeOperarEmpresa(req, res, cita.empresa_id))) return;
+
         const { data, error } = await supabase
             .from('citas')
             .update({ estado })
-            .eq('id', req.params.id)
+            .eq('id', cita.id)
             .select()
             .single();
 
@@ -703,9 +1152,16 @@ async function updateCitaEstado(req, res) {
 // ============================================
 
 function setupAdminRoutes(app) {
+    // Sesión
     app.post('/api/admin/login', login);
     app.post('/api/admin/logout', requireAuth, logout);
     app.get('/api/admin/validate', requireAuth, validateSession);
+
+    // Usuarios del panel (propietario gestiona su gente; superadmin a todos)
+    app.get('/api/admin/usuarios', requireAuth, getUsuarios);
+    app.post('/api/admin/usuarios', requireAuth, createUsuario);
+    app.put('/api/admin/usuarios/:id', requireAuth, updateUsuario);
+    app.delete('/api/admin/usuarios/:id', requireAuth, deleteUsuario);
 
     // Empresas
     app.get('/api/admin/empresas', requireAuth, getEmpresas);
@@ -744,6 +1200,21 @@ function setupAdminRoutes(app) {
     app.put('/api/admin/citas/:id/estado', requireAuth, updateCitaEstado);
 }
 
-setInterval(limpiarSesionesVencidas, 60 * 60 * 1000).unref();
+// Limpieza de sesiones vencidas en la base. La preparación del primer
+// superadmin corre no bloqueante al arrancar el servidor.
+setInterval(() => {
+    supabase
+        .from('sesiones_admin')
+        .delete()
+        .lt('expira', new Date().toISOString())
+        .then(({ error }) => {
+            if (error) console.warn('Error limpiando sesiones vencidas:', error.message);
+        })
+        .catch(() => {});
+}, 60 * 60 * 1000).unref();
+
+prepararUsuarioInicial().catch(err => {
+    console.error('❌ Error preparando el superadmin inicial:', err.message);
+});
 
 module.exports = { setupAdminRoutes };
