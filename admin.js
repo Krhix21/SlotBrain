@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const numeros = require('./numeros');
 const bot = require('./bot');
 const { firmarLink } = require('./auth');
+const { zonedToUtc } = require('./tiempo');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
@@ -1194,6 +1195,23 @@ async function createCita(req, res) {
         updates.estado = updates.estado || 'confirmada';
         updates.duracion_minutos = updates.duracion_minutos || 60;
         updates.canal = 'panel';
+
+        // La hora de pared debe nacer con su instante real: sin
+        // inicio_utc el scheduler de recordatorios nunca vería la cita.
+        // (Las citas agendadas por el bot ya lo hacen vía calendar.js.)
+        const { data: empresaZ } = await supabase
+            .from('empresas')
+            .select('zona_horaria')
+            .eq('id', updates.empresa_id)
+            .maybeSingle();
+        if (empresaZ?.zona_horaria) {
+            try {
+                const instante = zonedToUtc(updates.fecha, updates.hora, empresaZ.zona_horaria);
+                if (instante && !isNaN(instante.getTime())) {
+                    updates.inicio_utc = instante.toISOString();
+                }
+            } catch { /* fecha u hora con formato raro: queda null como antes */ }
+        }
 
         const { data, error } = await supabase.from('citas').insert(updates).select().single();
         if (error) throw error;
