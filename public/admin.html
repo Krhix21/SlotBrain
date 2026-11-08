@@ -314,6 +314,15 @@
                     </p>
                 </div>
 
+                <div id="bannerModoPrueba" style="display:none; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.35); border-radius:12px; padding:1rem 1.25rem; margin-bottom:1.5rem;">
+                    <p style="font-size:0.8rem; color:#fbbf24; margin:0; line-height:1.6;">
+                        <strong>🔢 Modo PRUEBA (pilot)</strong> — Solo pueden escribirte los números verificados en Meta
+                        (máximo 5: el dueño, un colaborador, tú y quien elija el dueño). Agrega los destinatarios en
+                        <strong>Meta for Developers → WhatsApp → API Setup → "To"</strong>. Para clientes reales, migrate a
+                        <strong>modo producción</strong> conectando la línea real de la empresa (botón Conectar).
+                    </p>
+                </div>
+
                 <div id="contenedorSelectorNumeros" class="card" style="padding:1.25rem; margin-bottom:1.5rem;">
                     <label style="display:block; font-size:0.75rem; font-weight:600; color:#6b7280; margin-bottom:0.5rem; letter-spacing:0.05em;">EMPRESA</label>
                     <select id="selectorEmpresaNumeros" class="field input-glow" onchange="onEmpresaNumerosChange()"
@@ -612,23 +621,33 @@
         <!-- Paso a paso -->
         <div style="background:#0d0d10; border:1px solid #1e1e26; border-radius:12px; padding:1rem 1.25rem; margin-bottom:1.25rem; font-size:0.72rem; color:#9ca3af; line-height:1.7;">
             <p style="margin:0 0 4px; color:#f59e0b; font-weight:700; letter-spacing:0.06em; text-transform:uppercase;">Paso a paso · 5 minutos</p>
-            <p style="margin:0;">1. Tu Meta Business ya debe estar <strong>verificado</strong> (empresa) y tener una <strong>WABA</strong> con tu número agregado; el número NO puede estar activo en la app del celular.</p>
-            <p style="margin:0;">2. En Meta for Developers → tu app → <strong>Usuarios del sistema</strong>: crea uno, guárdalo y genera un <strong>token permanente</strong> con permisos <code style="color:#f59e0b;">whatsapp_business_management</code> y <code style="color:#f59e0b;">whatsapp_business_messaging</code>.</p>
-            <p style="margin:0;">3. En WhatsApp → <strong>API Setup</strong>: copia el <strong>Phone Number ID</strong>.</p>
-            <p style="margin:0;">4. Pega las 3 cosas abajo y pulsa <strong>Probar conexión</strong>: si Meta responde, te lleno el teléfono yo mismo.</p>
-            <p style="margin:0;">5. Guardar: el token queda <strong>cifrado</strong> y nunca vuelve a mostrarse.</p>
+            <p style="margin:0;"><strong style="color:#fbbf24;">FASE 1 — Modo PRUEBA (piloto):</strong> el número es el de la app de Meta y solo le escriben los 5 destinatarios verificados. Pega su phone_number_id + token permanente y listo (WABA ID déjalo vacío).</p>
+            <p style="margin:0;"><strong style="color:#25d366;">FASE 2 — Conectar número REAL (producción):</strong> el dueño compra una SIM exclusiva para el bot → el número se registra desde la app de Meta (el dueño recibe el código SMS y lo dicta) → token permanente del usuario del sistema → aquí se completan teléfono + phone_number_id + <strong>WABA ID</strong> + token. Servicios, profesionales y citas NO se tocan: solo cambia la conexión.</p>
+            <p style="margin:0;">Antes de guardar, <strong>Probar conexión</strong> valida el token contra Meta; el token queda <strong>cifrado</strong> y nunca vuelve a mostrarse.</p>
         </div>
 
         <form id="formNumero">
             <div style="display:flex; flex-direction:column; gap:1rem;">
                 <div>
+                    <label class="lbl">Modo de conexión *</label>
+                    <select id="numModo" class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem; cursor:pointer;">
+                        <option value="prueba" selected>Prueba · número de Meta (piloto, máx. 5 destinatarios verificados)</option>
+                        <option value="produccion">Producción · línea real de la empresa (Fase 2)</option>
+                    </select>
+                    <p style="font-size:0.68rem; color:#4b5563; margin-top:4px;">Solo puede haber UNA empresa usando el número de prueba a la vez.</p>
+                </div>
+                <div>
                     <label class="lbl">Phone Number ID de Meta *</label>
                     <input id="numPhoneId" type="text" placeholder="123456789012345" class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem;">
                 </div>
                 <div>
+                    <label class="lbl">WABA ID (solo para línea real / Fase 2)</label>
+                    <input id="numWabaId" type="text" placeholder="Ej: 987654321098765 (déjalo vacío en modo prueba)" class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem;">
+                </div>
+                <div>
                     <label class="lbl">Token permanente de Meta *</label>
-                    <input id="numToken" type="password" placeholder="Pégra aquí el token..." class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem;">
-                    <p style="font-size:0.68rem; color:#4b5563; margin-top:4px;">Queda cifrado en el servidor. Solo se usa para enviar mensajes con tu número.</p>
+                    <input id="numToken" type="password" placeholder="Péga aquí el token..." class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem;">
+                    <p style="font-size:0.68rem; color:#4b5563; margin-top:4px;">De usuario del sistema, PERMANENTE (no el temporal de 24 h), con permisos <code style="color:#f59e0b;">whatsapp_business_management</code> y <code style="color:#f59e0b;">whatsapp_business_messaging</code>. Queda cifrado en el servidor.</p>
                 </div>
                 <div>
                     <button type="button" onclick="probarConexionMeta()" id="btnProbarMeta" class="btn-gold" style="width:100%; padding:0.7rem; border-radius:10px; border:none; cursor:pointer; font-size:0.8rem; display:flex; align-items:center; justify-content:center; gap:6px;">
@@ -1728,6 +1747,10 @@ async function poblarSelectorEmpresaNumeros() {
     const btn = document.getElementById('btnNuevoNumero');
     const empresaDeUsuario = empresaIdActual();
 
+    // El aviso del piloto: se muestra cuando el número ACTIVO de la
+    // empresa está en modo prueba.
+    actualizarBannerModoPrueba();
+
     if (!esSuperadminUI() && empresaDeUsuario) {
         // Usuario de empresa: NADA de selector, su empresa es fija y su
         // lista carga de una.
@@ -1774,6 +1797,7 @@ async function cargarNumeros(empresaId) {
 }
 
 function renderNumeros() {
+    actualizarBannerModoPrueba();
     const el = document.getElementById('listaNumeros');
 
     if (!numerosCache.length) {
@@ -1802,6 +1826,9 @@ function renderNumeros() {
                         ${n.token_conectado
                             ? `<span class="badge-green" style="padding:2px 8px; border-radius:99px; font-size:0.68rem;">Token seguro ✓</span>`
                             : `<span class="badge-amber" style="padding:2px 8px; border-radius:99px; font-size:0.68rem;">Sin token guardado</span>`}
+                        ${n.modo === 'produccion'
+                            ? `<span class="badge-green" style="padding:2px 8px; border-radius:99px; font-size:0.68rem; font-weight:600;">PRODUCCIÓN</span>`
+                            : `<span class="badge-amber" style="padding:2px 8px; border-radius:99px; font-size:0.68rem; font-weight:600;" title="Solo números verificados en Meta">PRUEBA</span>`}
                         <span class="${n.activo ? 'badge-green' : 'badge-gray'}" style="padding:2px 8px; border-radius:99px; font-size:0.68rem;">${n.activo ? 'Activo' : 'Inactivo'}</span>
                     </div>
                 </div>
@@ -1821,6 +1848,7 @@ function renderNumeros() {
 function abrirModalNumero() {
     document.getElementById('formNumero').reset();
     document.getElementById('resultadoPruebaMeta').style.display = 'none';
+    document.getElementById('numModo').value = 'prueba';
     abrirModal('modalNumero');
 }
 
@@ -1903,7 +1931,9 @@ document.getElementById('formNumero').addEventListener('submit', async (e) => {
             telefono,
             phone_number_id,
             etiqueta: document.getElementById('numEtiqueta').value.trim() || null,
-            meta_token: meta_token || null
+            meta_token: meta_token || null,
+            modo: document.getElementById('numModo').value || 'prueba',
+            waba_id: document.getElementById('numWabaId').value.trim() || null
         });
 
         if (res.ok) {
@@ -1916,6 +1946,14 @@ document.getElementById('formNumero').addEventListener('submit', async (e) => {
         }
     } catch (err) { if (err.message !== 'unauthorized') showToast('Error de conexión', 'error'); }
 });
+
+/** Banner del piloto: visible si el número ACTIVO está en modo prueba. */
+function actualizarBannerModoPrueba() {
+    const banner = document.getElementById('bannerModoPrueba');
+    if (!banner) return;
+    const hayPruebaActiva = numerosCache.some(n => n.activo && n.modo === 'prueba');
+    banner.style.display = hayPruebaActiva ? 'block' : 'none';
+}
 
 async function toggleNumero(id, activo) {
     try {
@@ -2032,6 +2070,11 @@ function renderCitas() {
         const estilo = COLORES_ESTADO[c.estado] || COLORES_ESTADO.agendada;
         const profesional = c.trabajadores?.nombre;
 
+        // Recordatorios del scheduler: si hubo intentos fallidos, la
+        // cita lleva un badge visible con el motivo del último fallo.
+        const fallidos = Object.entries(c.notificaciones || {})
+            .filter(([, v]) => v && v.estado === 'fallido');
+
         return `
         <div class="card fade-in" style="margin-bottom:0.75rem; padding:1.1rem 1.25rem;">
             <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:1rem;">
@@ -2039,6 +2082,10 @@ function renderCitas() {
                     <div style="display:flex; align-items:center; gap:8px; margin-bottom:5px; flex-wrap:wrap;">
                         <h4 style="font-size:0.9rem; font-weight:700; color:#fff; margin:0;">${escHtml(c.nombre_cliente || 'Sin nombre')}</h4>
                         <span style="padding:2px 8px; border-radius:99px; font-size:0.68rem; background:${estilo.bg}; border:1px solid ${estilo.bd}; color:${estilo.fg};">${escHtml(c.estado)}</span>
+                        ${fallidos.map(([clave, v]) => `
+                            <span class="badge-red" title="${escHtml(v.motivo || '')}" style="padding:2px 8px; border-radius:99px; font-size:0.68rem; cursor:help;">
+                                <i class="fas fa-triangle-exclamation"></i> recordatorio ${escHtml(clave)} fallido
+                            </span>`).join('')}
                     </div>
                     <div style="display:flex; flex-wrap:wrap; gap:12px; font-size:0.76rem; color:#6b7280;">
                         <span><i class="fas fa-calendar" style="margin-right:4px;"></i>${escHtml(c.fecha)}</span>

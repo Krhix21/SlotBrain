@@ -85,9 +85,15 @@ async function phoneNumberIdDe(empresaId) {
     return (data && data[0]?.phone_number_id) || null;
 }
 
-async function marcarTipo(id, clave) {
-    // Se escribe sobre la fila fresca para no pisar otros tipos marcados
-    // en ciclos paralelos: el UPDATE re-lee y fusiona el JSONB.
+/**
+ * Registra el resultado del intento sobre la clave (tipo) de esta cita.
+ *   · { estado:'enviado', ts }  → el scheduler NO reenvía (idempotencia).
+ *   · { estado:'fallido', motivo, ts } → el scheduler reintenta el
+ *     siguiente ciclo y el panel puede revisar el motivo.
+ * Se lee la fila fresca antes de escribir para no pisar otra clave
+ * marcada en el mismo ciclo.
+ */
+async function registrarResultado(id, clave, estado, motivo = null) {
     const { data: cita } = await supabase
         .from('citas')
         .select('notificaciones')
@@ -95,12 +101,24 @@ async function marcarTipo(id, clave) {
         .maybeSingle();
 
     const actuales = (cita && cita.notificaciones) || {};
-    actuales[clave] = new Date().toISOString();
+    actuales[clave] = estado === 'enviado'
+        ? { estado, ts: new Date().toISOString() }
+        : { estado, motivo: motivo || 'sin detalle', ts: new Date().toISOString() };
 
     return supabase
         .from('citas')
         .update({ notificaciones: actuales })
         .eq('id', id);
+}
+
+/** ¿Esta clave ya quedó ENVIADA? (los fallidos siempre se re-intentan)
+ * Los registros viejos eran strings con la hora del envío: se respetan
+ * como enviados para no reenviar recordatorios que ya salieron. */
+function yaEnviado(notificaciones, clave) {
+    const registro = notificaciones?.[clave];
+    if (!registro) return false;
+    if (typeof registro === 'string') return true; // formato antiguo
+    return registro.estado === 'enviado';
 }
 
 async function revisar() {
@@ -120,7 +138,7 @@ async function revisar() {
         const horasProf = politicas.recordatorio_profesional_horas;
         if (faltan <= horasProf * 60 * 60 * 1000) {
             const clave = claveNotificacion('profesional', horasProf);
-            if (!cita.notificaciones || !cita.notificaciones[clave]) {
+            if (!yaEnviado(cita.notificaciones, clave)) {
                 if (trabajador?.telefono) {
                     const texto =
                         `🔔 Recordatorio ${empresa?.nombre || ''}: citas con ` +
@@ -128,19 +146,23 @@ async function revisar() {
                         `a las ${cita.hora} (${cita.nombre_servicio}). No olvides prepararte.`;
 
                     const phoneNumberId = await phoneNumberIdDe(cita.empresa_id);
-                    const enviado = phoneNumberId
-                        ? !!(await enviarMensajeTexto(trabajador.telefono, texto, phoneNumberId))
-                        : false;
+                    const intento = await enviarMensajeTexto(trabajador.telefono, texto, phoneNumberId, { diagnostico: true });
 
-                    if (enviado) {
+                    if (intento.enviado) {
                         console.log(`📤 Recordatorio profesional ${clave} → ${trabajador.nombre} (${cita.fecha} ${cita.hora})`);
-                        await marcarTipo(cita.id, clave);
+                        await registrarResultado(cita.id, clave, 'enviado');
                     } else {
-                        console.warn(`⚠️  No se pudo enviar el recordatorio profesional ${clave} (cita ${cita.id}): falta token de Meta o el número no responde. Se reintenta el próximo ciclo.`);
+                        console.warn(`⚠️  Recordatorio profesional ${clave} (cita ${cita.id}) → fallido. Se reintenta el próximo ciclo.`);
+                        await registrarResultado(
+                            cita.id, clave, 'fallido',
+                            intento.error
+                                ? `[${intento.error.tipo}] ${intento.error.motivo}`
+                                : 'sin token de Meta configurado o el número no respondió'
+                        );
                     }
                 } else {
                     console.warn(`⚠️  El profesional ${trabajador?.nombre || cita.trabajador_id} no tiene teléfono: sin recordatorio.`);
-                    await marcarTipo(cita.id, clave); // no reintentar para siempre
+                    await registrarResultado(cita.id, clave, 'fallido', 'el profesional no tiene teléfono en el panel'); // no reintentar para siempre
                 }
             }
         }
@@ -149,22 +171,26 @@ async function revisar() {
         const horasCli = politicas.recordatorio_cliente_horas;
         if (faltan <= horasCli * 60 * 60 * 1000 && cita.telefono_cliente) {
             const clave = claveNotificacion('cliente', horasCli);
-            if (!cita.notificaciones || !cita.notificaciones[clave]) {
+            if (!yaEnviado(cita.notificaciones, clave)) {
                 const texto =
                     `Hola ${cita.nombre_cliente} 👋 Te recuerdo tu cita de ${cita.nombre_servicio} ` +
                     `en ${empresa?.nombre || 'nuestro negocio'} el ${formatearFechaLarga(cita.fecha)} ` +
                     `a las ${cita.hora}. Responde SÍ para confirmar o NO si necesitas cambiarla.`;
 
                 const phoneNumberId = await phoneNumberIdDe(cita.empresa_id);
-                const enviado = phoneNumberId
-                    ? !!(await enviarMensajeTexto(cita.telefono_cliente, texto, phoneNumberId))
-                    : false;
+                const intento = await enviarMensajeTexto(cita.telefono_cliente, texto, phoneNumberId, { diagnostico: true });
 
-                if (enviado) {
+                if (intento.enviado) {
                     console.log(`📤 Recordatorio cliente ${clave} → ${cita.telefono_cliente} (${cita.fecha} ${cita.hora})`);
-                    await marcarTipo(cita.id, clave);
+                    await registrarResultado(cita.id, clave, 'enviado');
                 } else {
-                    console.warn(`⚠️  No se pudo enviar el recordatorio cliente ${clave} (cita ${cita.id}). Se reintenta el próximo ciclo.`);
+                    console.warn(`⚠️  Recordatorio cliente ${clave} (cita ${cita.id}) → fallido. Se reintenta el próximo ciclo.`);
+                    await registrarResultado(
+                        cita.id, clave, 'fallido',
+                        intento.error
+                            ? `[${intento.error.tipo}] ${intento.error.motivo}`
+                            : 'sin token de Meta configurado o el número no respondió'
+                    );
                 }
             }
         }

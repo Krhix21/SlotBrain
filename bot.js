@@ -607,7 +607,8 @@ async function procesarMensajeWhatsapp({ telefonoBot, phoneNumberId, telefonoCli
         if (messageId) marcarComoLeido(messageId, phoneNumberId).catch(() => {});
 
         // La empresa se resuelve por el número receptor del webhook.
-        const empresaId = await resolverEmpresaId(telefonoBot);
+        // El phone_number_id es la clave principal de routing.
+        const empresaId = await resolverEmpresaId(telefonoBot, phoneNumberId);
         if (!empresaId) {
             console.error(`❌ El número ${telefonoBot} no está registrado en numeros_bot. Mensaje ignorado.`);
             return;
@@ -740,8 +741,8 @@ async function procesarMensajeWhatsapp({ telefonoBot, phoneNumberId, telefonoCli
     }
 }
 
-async function resolverEmpresaId(telefonoBot) {
-    const bot = await numeros.resolverBot(telefonoBot);
+async function resolverEmpresaId(telefonoBot, phoneNumberId) {
+    const bot = await numeros.resolverBot(telefonoBot, phoneNumberId);
     return bot ? bot.empresa_id : null;
 }
 

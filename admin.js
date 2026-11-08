@@ -632,7 +632,7 @@ async function createNumero(req, res) {
     try {
         if (!(await puedeOperarEmpresa(req, res, req.params.empresa_id))) return;
 
-        const { telefono, phone_number_id, etiqueta, meta_token } = req.body || {};
+        const { telefono, phone_number_id, etiqueta, meta_token, waba_id, modo } = req.body || {};
 
         const telefonoNormalizado = numeros.normalizarTelefono(telefono);
         if (!telefonoNormalizado) {
@@ -645,12 +645,38 @@ async function createNumero(req, res) {
             return fallo(res, 'El token de Meta recibido no parece válido (muy corto)');
         }
 
+        const modoNormalizado = (modo === 'produccion') ? 'produccion' : 'prueba';
+
+        // El número de PRUEBA de Meta es UNO por app: solo puede usarlo
+        // una empresa a la vez, aparte de que solo acepta los 5
+        // destinatarios verificados.
+        if (modoNormalizado === 'prueba') {
+            const { data: yaEnPrueba } = await supabase
+                .from('numeros_bot')
+                .select('id, empresa_id, telefono')
+                .eq('modo', 'prueba')
+                .eq('activo', true)
+                .maybeSingle();
+
+            if (yaEnPrueba && yaEnPrueba.telefono !== telefonoNormalizado) {
+                const { data: dueño } = await supabase
+                    .from('empresas')
+                    .select('nombre')
+                    .eq('id', yaEnPrueba.empresa_id)
+                    .maybeSingle();
+                return fallo(res, `El número de PRUEBA ya lo usa "${dueño?.nombre || 'otra empresa'}" — solo puede usarlo una empresa a la vez. ` +
+                    'Para esta empresa registra una línea real (modo "produccion") o finaliza el piloto de la otra primero.');
+            }
+        }
+
         const fila = {
             empresa_id: req.params.empresa_id,
             telefono: telefonoNormalizado,
             phone_number_id,
             etiqueta: etiqueta || null,
-            activo: true
+            activo: true,
+            modo: modoNormalizado,
+            waba_id: (typeof waba_id === 'string' && waba_id.trim()) ? waba_id.trim() : null
         };
 
         // El token se guarda CIFRADO y jamás vuelve a salir por la API.
@@ -661,7 +687,7 @@ async function createNumero(req, res) {
         const { data, error } = await supabase
             .from('numeros_bot')
             .insert(fila)
-            .select('id, empresa_id, telefono, phone_number_id, etiqueta, activo, creado_en, meta_token_cifrado')
+            .select('id, empresa_id, telefono, phone_number_id, waba_id, modo, etiqueta, activo, creado_en, meta_token_cifrado')
             .single();
 
         if (error) {
@@ -730,14 +756,35 @@ async function updateNumero(req, res) {
         // El número identifica a qué empresa pertenece: permiso por ahí.
         const { data: numero } = await supabase
             .from('numeros_bot')
-            .select('id, empresa_id, phone_number_id')
+            .select('id, empresa_id, phone_number_id, modo')
             .eq('id', req.params.id)
             .maybeSingle();
 
         if (!numero) return fallo(res, 'Número no encontrado', 404);
         if (!(await puedeOperarEmpresa(req, res, numero.empresa_id))) return;
 
-        const updates = soloCampos(req.body, ['phone_number_id', 'etiqueta', 'activo']);
+        const updates = soloCampos(req.body, ['phone_number_id', 'etiqueta', 'activo', 'waba_id', 'modo', 'telefono']);
+
+        // El modo es 'prueba' | 'produccion': es la Fase 2 del piloto
+        // (pasar a línea real = editar la conexión, sin tocar código).
+        if (updates.modo !== undefined) {
+            if (updates.modo !== 'prueba' && updates.modo !== 'produccion') {
+                return fallo(res, 'modo debe ser "prueba" (número de Meta) o "produccion" (línea real)');
+            }
+            // Si pasa a PRUEBA y otra empresa ya la usa: explicar.
+            if (updates.modo === 'prueba' && numero.modo !== 'prueba') {
+                const { data: yaEnPrueba } = await supabase
+                    .from('numeros_bot')
+                    .select('id')
+                    .eq('modo', 'prueba')
+                    .eq('activo', true)
+                    .neq('id', numero.id)
+                    .maybeSingle();
+                if (yaEnPrueba) {
+                    return fallo(res, 'El número de PRUEBA ya lo usa otra empresa — solo puede usarlo una a la vez.');
+                }
+            }
+        }
 
         // Rotación de token: se cifra el nuevo y nunca se devuelve.
         if (req.body?.meta_token !== undefined && req.body?.meta_token !== null && String(req.body.meta_token).trim() !== '') {
@@ -751,7 +798,7 @@ async function updateNumero(req, res) {
             .from('numeros_bot')
             .update(updates)
             .eq('id', numero.id)
-            .select('id, empresa_id, telefono, phone_number_id, etiqueta, activo, creado_en, meta_token_cifrado')
+            .select('id, empresa_id, telefono, phone_number_id, waba_id, modo, etiqueta, activo, creado_en, meta_token_cifrado')
             .single();
 
         if (error) throw error;

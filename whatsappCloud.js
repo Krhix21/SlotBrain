@@ -20,6 +20,7 @@
 
 const { createClient } = require('@supabase/supabase-js');
 const tokensMeta = require('./tokensMeta');
+const { explicarErrorMeta } = require('./erroresMeta');
 
 const GRAPH_API_VERSION = 'v24.0';
 
@@ -120,13 +121,31 @@ function cabeceras(token) {
 
 /**
  * Envía un mensaje de texto simple.
+ *
+ * Contrato normal: SOLO devuelve el payload cuando el mensaje se
+ * admitió (HTTP 2xx). Cualquier error de Meta queda logueado legible
+ * (con el JSON crudo de Meta para el rastro) y devuelve null: así el
+ * llamador (bot/recordatorios) no confunde "enviado" con "rechazado",
+ * que antes marcaba recordatorios como enviados cuando Meta rechazó.
+ *
  * @param {string} numeroDestino - Número internacional SIN "+" (ej. "573001234567")
  * @param {string} texto - Contenido del mensaje
  * @param {string} phoneNumberId - A qué número se responde. Opcional si hay uno solo.
+ * @param {{diagnostico?:boolean}} [opciones]
+ * @returns {Promise<object|null|{enviado:boolean, error:{tipo,motivo}|null}>}
+ *          con {diagnostico:true} devuelve {enviado, error|null} con el
+ *          error explicado (para registrar el motivo del intento fallido).
  */
-async function enviarMensajeTexto(numeroDestino, texto, phoneNumberId) {
+async function enviarMensajeTexto(numeroDestino, texto, phoneNumberId, opciones = {}) {
     const cred = await credenciales(phoneNumberId);
-    if (!cred) return null;
+    const finalizar = (enviado, payload, errorExplicado) => {
+        if (opciones.diagnostico) return { enviado, error: errorExplicado || null };
+        return enviado ? payload : null;
+    };
+
+    if (!cred) {
+        return finalizar(false, null, null);
+    }
 
     try {
         const response = await fetch(urlMensajes(cred.phoneNumberId), {
@@ -140,22 +159,19 @@ async function enviarMensajeTexto(numeroDestino, texto, phoneNumberId) {
             })
         });
 
-        const data = await response.json();
-
         if (!response.ok) {
-            console.error('❌ Error enviando mensaje vía Cloud API:', JSON.stringify(data));
-
-            // 131049 = la ventana de 24 h con ese cliente está cerrada:
-            // solo se puede responder si él nos escribió primero hoy.
-            if (data?.error?.code === 131049) {
-                console.warn('⚠️  La ventana de 24h con este cliente está cerrada. El mensaje no salió.');
-            }
+            const data = await response.json().catch(() => ({}));
+            const { tipo, motivo, crudo } = explicarErrorMeta(data);
+            console.error(`❌ Envío a ${numeroDestino} RECHAZADO por Meta [${tipo}]`);
+            console.error(`   ${motivo}`);
+            console.error(`   crudo: ${crudo}`);
+            return finalizar(false, null, { tipo, motivo });
         }
 
-        return data;
+        return finalizar(true, response.json());
     } catch (error) {
         console.error('❌ Error de red enviando mensaje vía Cloud API:', error);
-        return null;
+        return finalizar(false, null, null);
     }
 }
 
