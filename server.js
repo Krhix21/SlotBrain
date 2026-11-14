@@ -41,6 +41,15 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'landing.html'));
 });
 
+// Páginas legales (requisito de verificación OAuth de Google)
+app.get('/privacidad', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'privacidad.html'));
+});
+
+app.get('/terminos', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'terminos.html'));
+});
+
 // ============================================================
 // Webhook de Meta WhatsApp Cloud API
 // ============================================================
@@ -215,7 +224,7 @@ setInterval(() => {
         .catch(() => {});
 }, 6 * 60 * 60 * 1000).unref();
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`🚀 Servidor escuchando en el puerto ${PORT}`);
     bot.iniciar();
