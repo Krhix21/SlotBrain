@@ -557,6 +557,17 @@ async function createEmpresa(req, res) {
         const { data: empresa, error } = await supabase.from('empresas').insert(updates).select().single();
         if (error) throw error;
 
+        // Si el logo vino embebido (empresa nueva aún no tiene ruta en storage),
+        // migrarlo al bucket ahora que ya existe el id. Si el storage falla,
+        // se queda el dataURL: igual funciona.
+        if (updates.logo_url && /^data:image\//.test(updates.logo_url)) {
+            const urlLogo = await guardarLogoStorage(empresa.id, updates.logo_url);
+            if (urlLogo) {
+                await supabase.from('empresas').update({ logo_url: urlLogo }).eq('id', empresa.id);
+                empresa.logo_url = urlLogo;
+            }
+        }
+
         if (claveTemporalPropietario) {
             const { data: usuario, error: errU } = await supabase
                 .from('usuarios_admin')
@@ -587,11 +598,84 @@ async function createEmpresa(req, res) {
     }
 }
 
+// ============================================================
+// Logo en Supabase Storage (bucket publico `marcas`)
+// ============================================================
+const BUCKET_LOGOS = 'marcas';
+
+/**
+ * Convierte un dataURL a archivo en el bucket `marcas`, ruta <empresa_id>/logo.<ext>.
+ * Devuelve la URL pública, o null si el storage/bucket no está disponible
+ * (el caller decide si conserva el dataURL embebido como respaldo).
+ */
+async function guardarLogoStorage(empresaId, dataUrl) {
+    try {
+        const m = /^data:image\/(png|jpeg|jpg|webp|gif);base64,([a-z0-9+/=]+)$/i.exec(dataUrl || '');
+        if (!m) return null;
+        let ext = m[1].toLowerCase();
+        if (ext === 'jpeg' || ext === 'jpg') ext = 'jpg';
+        const contentType = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+        const buffer = Buffer.from(m[2], 'base64');
+        if (buffer.length > 2 * 1024 * 1024) return null;
+
+        const { error } = await supabase.storage
+            .from(BUCKET_LOGOS)
+            .upload(`${empresaId}/logo.${ext}`, buffer, { contentType, upsert: true });
+        if (error) {
+            console.warn('⚠️ storage logo:', error.message);
+            return null;
+        }
+        // Si habia un logo con otra extension, limpiarla para no acumular huerfanos.
+        for (const e of ['png', 'jpg', 'webp', 'gif']) {
+            if (e !== ext) await supabase.storage.from(BUCKET_LOGOS).remove([`${empresaId}/logo.${e}`]).catch(() => {});
+        }
+        const { data: pub } = supabase.storage.from(BUCKET_LOGOS).getPublicUrl(`${empresaId}/logo.${ext}`);
+        return pub.publicUrl;
+    } catch (error) {
+        console.warn('⚠️ storage logo:', error.message);
+        return null;
+    }
+}
+
+/** POST /api/admin/empresas/:id/logo { data_url } -> { url } */
+async function subirLogoEmpresa(req, res) {
+    try {
+        if (!(await puedeOperarEmpresa(req, res, req.params.id))) return;
+        const { data_url } = req.body || {};
+        if (typeof data_url !== 'string' || !/^data:image\//.test(data_url)) {
+            return fallo(res, 'Debe enviarse una imagen (data_url)');
+        }
+        if (data_url.length > 3 * 1024 * 1024) {
+            return fallo(res, 'Imagen demasiado grande (máximo 2 MB)');
+        }
+        const url = await guardarLogoStorage(req.params.id, data_url);
+        if (!url) return res.status(503).json({ error: 'Bucket de logos no disponible' });
+
+        const { error: errUpd } = await supabase.from('empresas').update({ logo_url: url }).eq('id', req.params.id);
+        if (errUpd) throw errUpd;
+        res.json({ url });
+    } catch (error) {
+        servidorError(res, 'Error subiendo logo', error);
+    }
+}
+
 async function updateEmpresa(req, res) {
     try {
         if (!(await puedeOperarEmpresa(req, res, req.params.id))) return;
 
         const updates = soloCampos(req.body, CAMPOS_EMPRESA);
+
+        // El logo puede ser URL https o dataURL de imagen (subida local del panel).
+        if (typeof updates.logo_url === 'string' && updates.logo_url) {
+            const esDataUrl = /^data:image\/(png|jpeg|webp|gif);base64,[a-z0-9+/=]+$/i.test(updates.logo_url);
+            const esUrlHttp = /^https:\/\/.+/i.test(updates.logo_url);
+            if (!esDataUrl && !esUrlHttp) {
+                return fallo(res, 'El logo debe ser una imagen (URL https o archivo subido desde el panel)');
+            }
+            if (updates.logo_url.length > 2 * 1024 * 1024) {
+                return fallo(res, 'El logo es demasiado grande (máximo 2 MB)');
+            }
+        }
 
         if (Object.keys(updates).length === 0) {
             return fallo(res, 'No enviaste ningún campo editable');
@@ -1254,6 +1338,217 @@ async function deleteServicio(req, res) {
 }
 
 // ============================================
+// Plantillas de WhatsApp (UTILITY/MARKETING/AUTHENTICATION)
+//
+// Hoy: la empresa registra aquí sus plantillas —como borrador, o
+// registrando las que ya creó a mano en su Meta Business (estado +
+// meta_id)— y el panel queda como única fuente de verdad.
+// Cuando Mi Negocio sea Tech Provider, el envío a validación de Meta
+// saldrá de esta misma información.
+// ============================================
+
+const CATEGORIAS_PLANTILLA = ['UTILITY', 'MARKETING', 'AUTHENTICATION'];
+const ESTADOS_PLANTILLA = ['borrador', 'enviada', 'aprobada', 'rechazada', 'pausada'];
+
+/** Índices {{n}} que usa un cuerpo, ordenados y sin repetir. */
+function variablesDeCuerpo(cuerpo) {
+    const nums = [...String(cuerpo).matchAll(/\{\{\s*(\d+)\s*\}\}/g)].map(m => parseInt(m[1], 10));
+    return [...new Set(nums)].sort((a, b) => a - b);
+}
+
+/**
+ * Valida y normaliza los campos de una plantilla.
+ * Devuelve { fila } lista para la base, o { error } con el motivo.
+ * Las reglas copian las de Meta (nombre en minúsculas con guion bajo,
+ * variables consecutivas desde {{1}}, máx. 3 botones, cuerpo ≤ 1024)
+ * para que el envío a validación futuro no dé sorpresas.
+ */
+function validarPlantilla(datos) {
+    const nombre = String(datos.nombre || '').trim().toLowerCase();
+    if (!/^[a-z0-9_]+$/.test(nombre)) {
+        return { error: 'El nombre solo admite minúsculas, números y guion bajo (regla de Meta), ej: recordatorio_cita' };
+    }
+    if (nombre.length > 64) {
+        return { error: 'El nombre no puede pasar de 64 caracteres' };
+    }
+
+    const categoria = String(datos.categoria || 'UTILITY').toUpperCase();
+    if (!CATEGORIAS_PLANTILLA.includes(categoria)) {
+        return { error: `Categoría inválida. Valores permitidos: ${CATEGORIAS_PLANTILLA.join(', ')}` };
+    }
+
+    const idioma = String(datos.idioma || 'es').trim();
+    if (!/^[a-z]{2,3}(_[A-Za-z0-9]{2,8})?$/.test(idioma)) {
+        return { error: 'Idioma inválido: usa el código de Meta, ej: es, es_CO, en_US' };
+    }
+
+    const cuerpo = String(datos.cuerpo || '').trim();
+    if (!cuerpo) return { error: 'El cuerpo de la plantilla es requerido' };
+    if (cuerpo.length > 1024) {
+        return { error: 'El cuerpo no puede pasar de 1024 caracteres (límite de Meta)' };
+    }
+
+    // Meta exige variables consecutivas empezando en {{1}}: si falta
+    // una en el medio, la validación de Meta rechazaría la plantilla.
+    const vars = variablesDeCuerpo(cuerpo);
+    for (let i = 0; i < vars.length; i++) {
+        if (vars[i] !== i + 1) {
+            return { error: `Las variables deben ser consecutivas desde {{1}}: falta {{${i + 1}}} en el cuerpo` };
+        }
+    }
+
+    // Un ejemplo por variable: Meta los pide al validar la plantilla.
+    const ejemplosEntrada = Array.isArray(datos.ejemplos) ? datos.ejemplos : [];
+    const ejemplos = vars.map((_, i) => (typeof ejemplosEntrada[i] === 'string' ? ejemplosEntrada[i].slice(0, 100) : ''));
+
+    const botonesEntrada = Array.isArray(datos.botones) ? datos.botones : [];
+    if (botonesEntrada.length > 3) {
+        return { error: 'Máximo 3 botones por plantilla (regla de Meta)' };
+    }
+    const botones = [];
+    for (const b of botonesEntrada) {
+        const tipo = String(b?.tipo || '').toUpperCase();
+        const texto = String(b?.texto || '').trim();
+        if (!texto) return { error: 'Los botones necesitan texto' };
+        if (texto.length > 25) {
+            return { error: 'El texto de un botón no puede pasar de 25 caracteres (regla de Meta)' };
+        }
+        if (tipo === 'URL') {
+            const url = String(b?.url || '').trim();
+            if (!/^https:\/\/.+/i.test(url)) {
+                return { error: 'El botón de URL necesita un enlace que empiece por https://' };
+            }
+            botones.push({ tipo, texto, url: url.slice(0, 2000) });
+        } else if (tipo === 'QUICK_REPLY') {
+            botones.push({ tipo, texto });
+        } else {
+            return { error: 'Tipo de botón inválido: QUICK_REPLY o URL' };
+        }
+    }
+
+    const fila = { nombre, categoria, idioma, cuerpo, ejemplos, botones };
+
+    // Estado y datos reales de Meta (si la empresa ya la creó a mano
+    // en su Meta Business, lo registra aquí).
+    if (datos.estado !== undefined) {
+        if (!ESTADOS_PLANTILLA.includes(datos.estado)) {
+            return { error: `Estado inválido. Valores permitidos: ${ESTADOS_PLANTILLA.join(', ')}` };
+        }
+        fila.estado = datos.estado;
+    }
+    if (datos.meta_id !== undefined) {
+        fila.meta_id = (typeof datos.meta_id === 'string' && datos.meta_id.trim())
+            ? datos.meta_id.trim().slice(0, 128)
+            : null;
+    }
+    if (datos.meta_estado !== undefined) {
+        fila.meta_estado = (typeof datos.meta_estado === 'string' && datos.meta_estado.trim())
+            ? datos.meta_estado.trim().slice(0, 64)
+            : null;
+    }
+    if (datos.motivo_rechazo !== undefined) {
+        fila.motivo_rechazo = (typeof datos.motivo_rechazo === 'string' && datos.motivo_rechazo.trim())
+            ? datos.motivo_rechazo.trim().slice(0, 500)
+            : null;
+    }
+
+    return { fila };
+}
+
+async function getPlantillas(req, res) {
+    try {
+        if (!(await puedeOperarEmpresa(req, res, req.params.empresa_id))) return;
+
+        const { data, error } = await supabase
+            .from('plantillas_whatsapp')
+            .select('*')
+            .eq('empresa_id', req.params.empresa_id)
+            .order('creado_en', { ascending: false });
+
+        if (error) throw error;
+        res.json(data);
+    } catch (error) {
+        servidorError(res, 'Error listando plantillas', error);
+    }
+}
+
+async function createPlantilla(req, res) {
+    try {
+        if (!(await puedeOperarEmpresa(req, res, req.params.empresa_id))) return;
+
+        const { fila, error } = validarPlantilla(req.body || {});
+        if (error) return fallo(res, error);
+
+        const { data, error: errIns } = await supabase
+            .from('plantillas_whatsapp')
+            .insert({ ...fila, empresa_id: req.params.empresa_id })
+            .select()
+            .single();
+
+        if (errIns) {
+            if (errIns.code === '23505') {
+                return fallo(res, 'Ya existe una plantilla con ese nombre e idioma en esta empresa', 409);
+            }
+            throw errIns;
+        }
+
+        res.status(201).json(data);
+    } catch (error) {
+        servidorError(res, 'Error creando plantilla', error);
+    }
+}
+
+/** Edición "merge": lo que no llega en el body se conserva. */
+async function updatePlantilla(req, res) {
+    try {
+        const { data: actual } = await supabase
+            .from('plantillas_whatsapp')
+            .select('id, empresa_id, nombre, categoria, idioma, cuerpo, ejemplos, botones, estado, meta_id, meta_estado, motivo_rechazo')
+            .eq('id', req.params.id)
+            .maybeSingle();
+
+        if (!actual) return fallo(res, 'Plantilla no encontrada', 404);
+        if (!(await puedeOperarEmpresa(req, res, actual.empresa_id))) return;
+
+        const fusion = { ...actual, ...(req.body || {}) };
+        const { fila, error } = validarPlantilla(fusion);
+        if (error) return fallo(res, error);
+
+        const { data, error: errUpd } = await supabase
+            .from('plantillas_whatsapp')
+            .update({ ...fila, actualizado_en: new Date().toISOString() })
+            .eq('id', actual.id)
+            .select()
+            .single();
+
+        if (errUpd) throw errUpd;
+        res.json(data);
+    } catch (error) {
+        servidorError(res, 'Error actualizando plantilla', error);
+    }
+}
+
+async function deletePlantilla(req, res) {
+    try {
+        const { data: plantilla } = await supabase
+            .from('plantillas_whatsapp')
+            .select('id, empresa_id, nombre')
+            .eq('id', req.params.id)
+            .maybeSingle();
+
+        if (!plantilla) return fallo(res, 'Plantilla no encontrada', 404);
+        if (!(await puedeOperarEmpresa(req, res, plantilla.empresa_id))) return;
+
+        const { error } = await supabase.from('plantillas_whatsapp').delete().eq('id', plantilla.id);
+        if (error) throw error;
+
+        res.json({ ok: true });
+    } catch (error) {
+        servidorError(res, 'Error eliminando plantilla', error);
+    }
+}
+
+// ============================================
 // Citas
 // ============================================
 
@@ -1391,6 +1686,7 @@ function setupAdminRoutes(app) {
     app.get('/api/admin/empresas', requireAuth, getEmpresas);
     app.post('/api/admin/empresas', requireAuth, createEmpresa);
     app.put('/api/admin/empresas/:id', requireAuth, updateEmpresa);
+    app.post('/api/admin/empresas/:id/logo', requireAuth, subirLogoEmpresa);
 
     // Números de respuesta
     app.get('/api/admin/numeros/:empresa_id', requireAuth, getNumeros);
@@ -1423,6 +1719,12 @@ function setupAdminRoutes(app) {
     app.get('/api/admin/citas/empresa/:empresa_id', requireAuth, getCitasByEmpresa);
     app.post('/api/admin/citas', requireAuth, createCita);
     app.put('/api/admin/citas/:id/estado', requireAuth, updateCitaEstado);
+
+    // Plantillas de WhatsApp (hoy registro/gestión; mañana envío a Meta)
+    app.get('/api/admin/plantillas/:empresa_id', requireAuth, getPlantillas);
+    app.post('/api/admin/plantillas/:empresa_id', requireAuth, createPlantilla);
+    app.put('/api/admin/plantillas/:id', requireAuth, updatePlantilla);
+    app.delete('/api/admin/plantillas/:id', requireAuth, deletePlantilla);
 }
 
 // Limpieza de sesiones vencidas en la base. La preparación del primer

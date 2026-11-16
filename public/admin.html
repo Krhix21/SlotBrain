@@ -3,7 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SlotBrain – Panel Admin</title>
+    <title>SlotBrain — Panel Admin</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="alternate icon" type="image/png" href="/favicon-64.png">
+    <link rel="apple-touch-icon" href="/favicon-64.png">
     <meta name="description" content="Panel de administración para configurar empresas, trabajadores y servicios del sistema de citas por WhatsApp.">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -12,6 +15,14 @@
         *, *::before, *::after { box-sizing: border-box; }
         body { font-family: 'Inter', system-ui, sans-serif; margin: 0; }
 
+        /* ── Tema de marca (se sobreescribe por empresa con JS; default = SlotBrain ámbar) ── */
+        :root {
+            --brand: #f59e0b; --brand-2: #d97706; --brand-hover: #fbbf24;
+            --brand-text: #fbbf24; --brand-ink: #0a0a0b;
+            --brand-soft: rgba(245,158,11,0.12); --brand-line: rgba(245,158,11,0.25);
+            --brand-glow: rgba(245,158,11,0.35);
+        }
+
         /* ── Scrollbar ── */
         ::-webkit-scrollbar { width: 5px; height: 5px; }
         ::-webkit-scrollbar-track { background: transparent; }
@@ -19,24 +30,24 @@
         ::-webkit-scrollbar-thumb:hover { background: #3a3a4a; }
 
         /* ── Input focus ── */
-        .field:focus { outline: none; border-color: #f59e0b !important; box-shadow: 0 0 0 3px rgba(245,158,11,0.15); }
+        .field:focus { outline: none; border-color: var(--brand) !important; box-shadow: 0 0 0 3px var(--brand-soft); }
 
         /* ── Sidebar item ── */
         .nav-item { transition: all 0.15s ease; }
-        .nav-item.active { background: rgba(245,158,11,0.12); border-left: 3px solid #f59e0b; color: #fbbf24; }
+        .nav-item.active { background: var(--brand-soft); border-left: 3px solid var(--brand); color: var(--brand-text); }
         .nav-item:not(.active):hover { background: rgba(255,255,255,0.04); color: #e5e7eb; }
 
         /* ── Btn primary ── */
         .btn-gold {
-            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-            color: #0a0a0b;
+            background: linear-gradient(135deg, var(--brand) 0%, var(--brand-2) 100%);
+            color: var(--brand-ink);
             font-weight: 600;
             transition: all 0.2s ease;
         }
         .btn-gold:hover {
-            background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+            background: linear-gradient(135deg, var(--brand-hover) 0%, var(--brand) 100%);
             transform: translateY(-1px);
-            box-shadow: 0 6px 20px rgba(245,158,11,0.35);
+            box-shadow: 0 6px 20px var(--brand-glow);
         }
         .btn-gold:active { transform: translateY(0); box-shadow: none; }
         .btn-gold:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
@@ -49,7 +60,7 @@
         .badge-green { background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.25); color: #86efac; }
         .badge-red   { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25); color: #fca5a5; }
         .badge-gray  { background: rgba(107,114,128,0.1); border: 1px solid #2a2a35; color: #6b7280; }
-        .badge-amber { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.25); color: #fbbf24; }
+        .badge-amber { background: var(--brand-soft); border: 1px solid var(--brand-line); color: var(--brand-text); }
 
         /* ── Animations ── */
         .fade-in { animation: fadeSlide 0.25s ease forwards; }
@@ -187,14 +198,15 @@
     <!-- ─── SIDEBAR ─── -->
     <aside id="sidebar" style="width:256px; min-height:100vh; background:#0d0d10; border-right:1px solid #1a1a22; display:flex; flex-direction:column; position:fixed; top:0; left:0; bottom:0; z-index:10;">
 
-        <!-- Logo -->
+        <!-- Logo (se rellena con la marca de la empresa tras cargar; ver renderMarcaSidebar) -->
         <div id="sidebarLogo" style="padding:1.5rem 1.25rem 1rem; border-bottom:1px solid #1a1a22;">
-            <div style="display:flex; align-items:center; gap:12px;">
-                <div style="width:38px; height:36px; border-radius:10px; background:linear-gradient(135deg,#f59e0b,#d97706); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-                    <svg aria-hidden="true" style="width:22px; height:21px;"><use href="#sbLogoInk"/></svg>
+            <div style="display:flex; align-items:center; gap:12px; min-width:0;">
+                <div id="sidebarLogoBox" style="width:38px; height:36px; border-radius:10px; background:linear-gradient(135deg,var(--brand),var(--brand-2)); display:flex; align-items:center; justify-content:center; flex-shrink:0; overflow:hidden;">
+                    <svg id="sidebarLogoDefault" aria-hidden="true" style="width:22px; height:21px;"><use href="#sbLogoInk"/></svg>
+                    <img id="sidebarLogoImg" src="" alt="" style="display:none; width:100%; height:100%; object-fit:cover;">
                 </div>
                 <div style="min-width:0;">
-                    <div aria-label="SlotBrain" style="font-weight:700; font-size:0.9rem; color:#fff; letter-spacing:-0.3px;">slot<span style="color:#f59e0b;">brain</span></div>
+                    <div id="sidebarBrandName" style="font-weight:700; font-size:0.9rem; color:#fff; letter-spacing:-0.3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">slot<span style="color:var(--brand);">brain</span></div>
                     <div id="sidebarRol" style="font-size:0.68rem; color:#4b5563;">Panel</div>
                 </div>
             </div>
@@ -217,6 +229,11 @@
                 <i class="fab fa-whatsapp" style="width:16px; text-align:center;"></i>
                 Números
             </button>
+            <button id="nav-plantillas" onclick="showSection('plantillas')" class="nav-item"
+                style="width:100%; text-align:left; display:flex; align-items:center; gap:10px; padding:0.7rem 1rem; border-radius:10px; border:none; cursor:pointer; font-size:0.8rem; font-weight:500; color:#6b7280; border-left:3px solid transparent;">
+                <i class="fas fa-file-alt" style="width:16px; text-align:center;"></i>
+                Plantillas
+            </button>
             <button id="nav-trabajadores" onclick="showSection('trabajadores')" class="nav-item"
                 style="width:100%; text-align:left; display:flex; align-items:center; gap:10px; padding:0.7rem 1rem; border-radius:10px; border:none; cursor:pointer; font-size:0.8rem; font-weight:500; color:#6b7280; border-left:3px solid transparent;">
                 <i class="fas fa-users" style="width:16px; text-align:center;"></i>
@@ -235,7 +252,7 @@
         </nav>
 
         <!-- User + Logout -->
-        <div style="padding:1rem 0.75rem; border-top:1px solid #1a1a22;">
+        <div style="padding:0.75rem 0.75rem 0.5rem; border-top:1px solid #1a1a22;">
             <div style="display:flex; align-items:center; justify-content:space-between;">
                 <div style="display:flex; align-items:center; gap:8px;">
                     <div style="width:30px; height:30px; border-radius:8px; background:#1a1a22; display:flex; align-items:center; justify-content:center;">
@@ -249,6 +266,7 @@
                     <i class="fas fa-sign-out-alt"></i>
                 </button>
             </div>
+            <div id="sidebarPowered" style="margin-top:0.65rem; text-align:center; font-size:0.6rem; color:#3f3f46; letter-spacing:0.04em;">Powered by <span style="color:#52525b; font-weight:600;">slotbrain</span></div>
         </div>
     </aside>
 
@@ -305,17 +323,17 @@
                     </button>
                 </div>
 
-                <div class="card" style="padding:1rem 1.25rem; margin-bottom:1.5rem; border-left:3px solid #f59e0b;">
+                <div class="card" style="padding:1rem 1.25rem; margin-bottom:1.5rem; border-left:3px solid var(--brand);">
                     <p style="font-size:0.78rem; color:#9ca3af; margin:0; line-height:1.6;">
                         Cada empresa conecta <strong>su propio número de WhatsApp</strong>. Al guardarlo,
                         el token queda <strong>cifrado en la base</strong> y nunca vuelve a mostrarse.
-                        El mapa de entorno <code style="color:#f59e0b;">META_TOKENS_JSON</code> sigue
-                        como primera opción de respaldo. Registra el número con su código de país, sin el <code style="color:#f59e0b;">+</code>.
+                        El mapa de entorno <code style="color:var(--brand);">META_TOKENS_JSON</code> sigue
+                        como primera opción de respaldo. Registra el número con su código de país, sin el <code style="color:var(--brand);">+</code>.
                     </p>
                 </div>
 
-                <div id="bannerModoPrueba" style="display:none; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.35); border-radius:12px; padding:1rem 1.25rem; margin-bottom:1.5rem;">
-                    <p style="font-size:0.8rem; color:#fbbf24; margin:0; line-height:1.6;">
+                <div id="bannerModoPrueba" style="display:none; background:var(--brand-soft); border:1px solid var(--brand-line); border-radius:12px; padding:1rem 1.25rem; margin-bottom:1.5rem;">
+                    <p style="font-size:0.8rem; color:var(--brand-text); margin:0; line-height:1.6;">
                         <strong>🔢 Modo PRUEBA (pilot)</strong> — Solo pueden escribirte los números verificados en Meta
                         (máximo 5: el dueño, un colaborador, tú y quien elija el dueño). Agrega los destinatarios en
                         <strong>Meta for Developers → WhatsApp → API Setup → "To"</strong>. Para clientes reales, migrate a
@@ -332,6 +350,41 @@
                 </div>
 
                 <div id="listaNumeros"></div>
+            </div>
+        </section>
+
+        <!-- ══ PLANTILLAS ══ -->
+        <section id="secPlantillas" class="fade-in" style="display:none; padding:2.5rem;">
+            <div style="max-width:900px; margin:0 auto;">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem;">
+                    <div>
+                        <h2 style="font-size:1.6rem; font-weight:800; color:#fff; margin:0 0 4px;">Plantillas de WhatsApp</h2>
+                        <p style="color:#4b5563; font-size:0.875rem; margin:0;">Mensajes aprobados por Meta para escribir fuera de la ventana de 24 h</p>
+                    </div>
+                    <button id="btnNuevaPlantilla" onclick="abrirModalPlantilla()" class="btn-gold" style="display:none; padding:0.6rem 1.25rem; border-radius:10px; border:none; cursor:pointer; font-size:0.8rem; align-items:center; gap:6px;">
+                        <i class="fas fa-plus"></i> Nueva plantilla
+                    </button>
+                </div>
+
+                <div class="card" style="padding:1rem 1.25rem; margin-bottom:1.5rem; border-left:3px solid var(--brand);">
+                    <p style="font-size:0.78rem; color:#9ca3af; margin:0; line-height:1.6;">
+                        Las plantillas son los mensajes con los que el bot puede <strong>iniciar</strong> una conversación
+                        cuando la ventana de 24 h ya cerró (ej. el recordatorio de cita). Regístralas aquí: si ya las
+                        creaste a mano en tu Meta Business, marca su estado y pega su ID. Cuando Mi Negocio sea
+                        <strong>Tech Provider</strong>, desde esta misma pantalla se enviarán a Meta para validación,
+                        sin copiarlas de un lado a otro.
+                    </p>
+                </div>
+
+                <div id="contenedorSelectorPlantillas" class="card" style="padding:1.25rem; margin-bottom:1.5rem;">
+                    <label style="display:block; font-size:0.75rem; font-weight:600; color:#6b7280; margin-bottom:0.5rem; letter-spacing:0.05em;">EMPRESA</label>
+                    <select id="selectorEmpresaPlantillas" class="field input-glow" onchange="onEmpresaPlantillasChange()"
+                        style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem; cursor:pointer;">
+                        <option value="">— Selecciona una empresa —</option>
+                    </select>
+                </div>
+
+                <div id="listaPlantillas"></div>
             </div>
         </section>
 
@@ -425,7 +478,7 @@
     <div class="modal-box" style="width:100%; max-width:640px; max-height:90vh; overflow-y:auto; padding:2rem;">
         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem;">
             <h3 id="modalEmpresaTitulo" style="font-size:1.1rem; font-weight:700; color:#fff; margin:0;">Nueva empresa</h3>
-            <button onclick="cerrarModal('modalEmpresa')" style="background:none; border:none; cursor:pointer; color:#4b5563; font-size:1.1rem;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#4b5563'">
+            <button onclick="cerrarModalEmpresa()" style="background:none; border:none; cursor:pointer; color:#4b5563; font-size:1.1rem;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#4b5563'">
                 <i class="fas fa-times"></i>
             </button>
         </div>
@@ -462,32 +515,33 @@
                 <div style="grid-column:1/-1;">
                     <label class="lbl">Mensaje de bienvenida del bot</label>
                     <textarea id="empBienvenida" rows="2" placeholder="¡Hola! Bienvenido a {nombre_negocio} 👋..." class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem; resize:none;"></textarea>
-                    <p style="font-size:0.7rem; color:#4b5563; margin-top:4px;">Variable disponible: <code style="color:#f59e0b;">{nombre_negocio}</code></p>
+                    <p style="font-size:0.7rem; color:#4b5563; margin-top:4px;">Variable disponible: <code style="color:var(--brand);">{nombre_negocio}</code></p>
                 </div>
                 <div style="grid-column:1/-1;">
                     <label class="lbl">Mensaje de confirmación de cita</label>
                     <textarea id="empConfirmacion" rows="3" placeholder="¡Perfecto {nombre}! Tu cita de {servicio} quedó agendada para el {fecha} a las {hora}..." class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem; resize:none;"></textarea>
-                    <p style="font-size:0.7rem; color:#4b5563; margin-top:4px;">Variables: <code style="color:#f59e0b;">{nombre} {servicio} {fecha} {hora} {nombre_negocio}</code></p>
+                    <p style="font-size:0.7rem; color:#4b5563; margin-top:4px;">Variables: <code style="color:var(--brand);">{nombre} {servicio} {fecha} {hora} {nombre_negocio}</code></p>
                 </div>
             </div>
 
             <!-- ── Marca y nicho (Fase 2) ── -->
             <div style="margin:1.5rem 0 1rem;">
-                <h4 style="font-size:0.75rem; font-weight:700; color:#f59e0b; letter-spacing:0.08em; text-transform:uppercase; margin:0 0 0.75rem;">Marca y nicho</h4>
+                <h4 style="font-size:0.75rem; font-weight:700; color:var(--brand); letter-spacing:0.08em; text-transform:uppercase; margin:0 0 0.75rem;">Marca y nicho</h4>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
                     <div>
-                        <label class="lbl">Logo (URL de la imagen)</label>
+                        <label class="lbl">Logo de la marca</label>
                         <div style="display:flex; align-items:center; gap:0.75rem;">
                             <img id="empLogoPreview" src="" alt="" style="width:44px; height:44px; border-radius:10px; object-fit:cover; display:none; border:1px solid #2a2a35; flex-shrink:0;">
-                            <input id="empLogoUrl" type="url" placeholder="https://.../logo.png" class="field input-glow" style="flex:1; min-width:0; padding:0.65rem 0.85rem; border-radius:10px; font-size:0.8rem;" onchange="refrescarPreviewLogo()">
+                            <input id="empLogoUrl" type="hidden">
+                            <input id="empLogoFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onchange="cargarLogoArchivo(this)" style="flex:1; min-width:0; font-size:0.72rem; color:#9ca3af;">
                         </div>
                         <p style="font-size:0.68rem; color:#4b5563; margin-top:4px;">Se muestra en tu panel y en la landing futura.</p>
                     </div>
                     <div>
                         <label class="lbl">Color de la marca</label>
                         <div style="display:flex; align-items:center; gap:0.6rem;">
-                            <input id="empColor" type="color" value="#f59e0b" style="width:44px; height:44px; padding:4px; border-radius:10px; border:1px solid #2a2a35; background:#16161c; cursor:pointer; flex-shrink:0;">
-                            <input id="empColorHex" type="text" value="#f59e0b" placeholder="#f59e0b" class="field input-glow" style="flex:1; min-width:0; padding:0.65rem 0.85rem; border-radius:10px; font-size:0.8rem;" onchange="document.getElementById('empColor').value=this.value">
+                            <input id="empColor" type="color" value="#f59e0b" oninput="document.getElementById('empColorHex').value=this.value;previewTemaMarca()" style="width:44px; height:44px; padding:4px; border-radius:10px; border:1px solid #2a2a35; background:#16161c; cursor:pointer; flex-shrink:0;">
+                            <input id="empColorHex" type="text" value="#f59e0b" placeholder="#f59e0b" class="field input-glow" style="flex:1; min-width:0; padding:0.65rem 0.85rem; border-radius:10px; font-size:0.8rem;" onchange="if(hexARgb(this.value)){document.getElementById('empColor').value=this.value.trim();previewTemaMarca()}">
                         </div>
                     </div>
                     <div>
@@ -536,13 +590,13 @@
             </div>
 
             <!-- ── Entregar panel al propietario (solo al CREAR, solo superadmin) ── -->
-            <div id="bloqueAdminEmail" style="display:none; margin-bottom:1rem; padding:1rem; border:1px solid rgba(245,158,11,0.3); background:rgba(245,158,11,0.06); border-radius:12px;">
-                <label class="lbl" style="color:#fbbf24;">Entregar acceso al propietario de esta empresa</label>
+            <div id="bloqueAdminEmail" style="display:none; margin-bottom:1rem; padding:1rem; border:1px solid var(--brand-line); background:var(--brand-soft); border-radius:12px;">
+                <label class="lbl" style="color:var(--brand-text);">Entregar acceso al propietario de esta empresa</label>
                 <input id="empAdminEmail" type="text" placeholder="correo-del-propietario@negocio.com" class="field input-glow" style="width:100%; padding:0.65rem 0.85rem; border-radius:10px; font-size:0.8rem;">
                 <p style="font-size:0.68rem; color:#9ca3af; margin-top:4px;">Al guardar, se crea su usuario con una <strong>clave temporal</strong> que te mostraré una sola vez.</p>
             </div>
             <div style="display:flex; gap:0.75rem; margin-top:1.5rem;">
-                <button type="button" onclick="cerrarModal('modalEmpresa')" style="flex:1; padding:0.75rem; border-radius:10px; border:1px solid #2a2a35; background:none; color:#9ca3af; font-size:0.875rem; cursor:pointer; font-weight:500;" onmouseover="this.style.background='rgba(255,255,255,0.04)'" onmouseout="this.style.background='none'">
+                <button type="button" onclick="cerrarModalEmpresa()" style="flex:1; padding:0.75rem; border-radius:10px; border:1px solid #2a2a35; background:none; color:#9ca3af; font-size:0.875rem; cursor:pointer; font-weight:500;" onmouseover="this.style.background='rgba(255,255,255,0.04)'" onmouseout="this.style.background='none'">
                     Cancelar
                 </button>
                 <button type="submit" class="btn-gold" style="flex:2; padding:0.75rem; border-radius:10px; border:none; cursor:pointer; font-size:0.875rem; display:flex; align-items:center; justify-content:center; gap:6px;">
@@ -620,8 +674,8 @@
 
         <!-- Paso a paso -->
         <div style="background:#0d0d10; border:1px solid #1e1e26; border-radius:12px; padding:1rem 1.25rem; margin-bottom:1.25rem; font-size:0.72rem; color:#9ca3af; line-height:1.7;">
-            <p style="margin:0 0 4px; color:#f59e0b; font-weight:700; letter-spacing:0.06em; text-transform:uppercase;">Paso a paso · 5 minutos</p>
-            <p style="margin:0;"><strong style="color:#fbbf24;">FASE 1 — Modo PRUEBA (piloto):</strong> el número es el de la app de Meta y solo le escriben los 5 destinatarios verificados. Pega su phone_number_id + token permanente y listo (WABA ID déjalo vacío).</p>
+            <p style="margin:0 0 4px; color:var(--brand); font-weight:700; letter-spacing:0.06em; text-transform:uppercase;">Paso a paso · 5 minutos</p>
+            <p style="margin:0;"><strong style="color:var(--brand-text);">FASE 1 — Modo PRUEBA (piloto):</strong> el número es el de la app de Meta y solo le escriben los 5 destinatarios verificados. Pega su phone_number_id + token permanente y listo (WABA ID déjalo vacío).</p>
             <p style="margin:0;"><strong style="color:#25d366;">FASE 2 — Conectar número REAL (producción):</strong> el dueño compra una SIM exclusiva para el bot → el número se registra desde la app de Meta (el dueño recibe el código SMS y lo dicta) → token permanente del usuario del sistema → aquí se completan teléfono + phone_number_id + <strong>WABA ID</strong> + token. Servicios, profesionales y citas NO se tocan: solo cambia la conexión.</p>
             <p style="margin:0;">Antes de guardar, <strong>Probar conexión</strong> valida el token contra Meta; el token queda <strong>cifrado</strong> y nunca vuelve a mostrarse.</p>
         </div>
@@ -674,6 +728,108 @@
                 </button>
             </div>
         </form>
+    </div>
+</div>
+
+<!-- Modal Plantilla de WhatsApp -->
+<div id="modalPlantilla" class="modal-bg" style="display:none; position:fixed; inset:0; z-index:100; align-items:center; justify-content:center; padding:1rem;">
+    <div class="modal-box" style="width:100%; max-width:880px; max-height:90vh; overflow-y:auto; padding:2rem;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem;">
+            <h3 id="modalPlantillaTitulo" style="font-size:1.1rem; font-weight:700; color:#fff; margin:0;">Nueva plantilla</h3>
+            <button onclick="cerrarModal('modalPlantilla')" style="background:none; border:none; cursor:pointer; color:#4b5563; font-size:1.1rem;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#4b5563'">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+
+        <div style="display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:1.5rem; align-items:start;">
+            <form id="formPlantilla">
+                <input type="hidden" id="plantillaIdInput">
+                <div style="display:flex; flex-direction:column; gap:1rem;">
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+                        <div>
+                            <label class="lbl">Nombre (Meta) *</label>
+                            <input id="plantNombre" type="text" placeholder="recordatorio_cita" class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem;">
+                            <p style="font-size:0.68rem; color:#4b5563; margin-top:4px;">Solo minúsculas, números y guion bajo.</p>
+                        </div>
+                        <div>
+                            <label class="lbl">Idioma (código Meta) *</label>
+                            <input id="plantIdioma" type="text" value="es" placeholder="es / es_CO / en_US" class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem;">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="lbl">Categoría *</label>
+                        <select id="plantCategoria" class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem; cursor:pointer;">
+                            <option value="UTILITY" selected>UTILITY · avisos de servicio (recordatorios, confirmaciones)</option>
+                            <option value="MARKETING">MARKETING · promos y novedades</option>
+                            <option value="AUTHENTICATION">AUTHENTICATION · códigos de verificación</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="lbl">Cuerpo del mensaje *</label>
+                        <textarea id="plantCuerpo" rows="4" maxlength="1024" placeholder="Hola {{1}}, te recordamos tu cita el {{2}} a las {{3}}. Responde SÍ para confirmar o NO para reprogramar." class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem; resize:vertical;" oninput="actualizarEjemplos(); actualizarPreview();"></textarea>
+                        <p style="font-size:0.68rem; color:#4b5563; margin-top:4px;">Usa {{1}}, {{2}}, {{3}}... para las variables. Máximo 1024 caracteres.</p>
+                    </div>
+                    <div>
+                        <label class="lbl">Ejemplos para cada variable</label>
+                        <div id="plantEjemplos" style="display:flex; flex-direction:column; gap:0.5rem;"></div>
+                        <p style="font-size:0.68rem; color:#4b5563; margin-top:4px;">Meta los pide al validar la plantilla: pon un valor realista de cada {{n}}.</p>
+                    </div>
+                    <div>
+                        <label class="lbl">Botones de respuesta rápida (máx. 3)</label>
+                        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.75rem;">
+                            <input id="plantBoton1" type="text" maxlength="25" placeholder="Ej: SÍ, confirmo" class="field input-glow" style="padding:0.7rem 1rem; border-radius:10px; font-size:0.8rem;" oninput="actualizarPreview()">
+                            <input id="plantBoton2" type="text" maxlength="25" placeholder="Ej: Reprogramar" class="field input-glow" style="padding:0.7rem 1rem; border-radius:10px; font-size:0.8rem;" oninput="actualizarPreview()">
+                            <input id="plantBoton3" type="text" maxlength="25" placeholder="(opcional)" class="field input-glow" style="padding:0.7rem 1rem; border-radius:10px; font-size:0.8rem;" oninput="actualizarPreview()">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="lbl">Botón de URL (opcional)</label>
+                        <div style="display:grid; grid-template-columns:1fr 2fr; gap:0.75rem;">
+                            <input id="plantUrlTexto" type="text" maxlength="25" placeholder="Ej: Ver ubicación" class="field input-glow" style="padding:0.7rem 1rem; border-radius:10px; font-size:0.8rem;" oninput="actualizarPreview()">
+                            <input id="plantUrlEnlace" type="text" placeholder="https://..." class="field input-glow" style="padding:0.7rem 1rem; border-radius:10px; font-size:0.8rem;" oninput="actualizarPreview()">
+                        </div>
+                    </div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+                        <div>
+                            <label class="lbl">Estado</label>
+                            <select id="plantEstado" class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem; cursor:pointer;">
+                                <option value="borrador" selected>Borrador (solo vive aquí)</option>
+                                <option value="enviada">Enviada a Meta (pendiente)</option>
+                                <option value="aprobada">Aprobada por Meta</option>
+                                <option value="rechazada">Rechazada por Meta</option>
+                                <option value="pausada">Pausada</option>
+                            </select>
+                            <p style="font-size:0.68rem; color:#4b5563; margin-top:4px;">Si ya la creaste a mano en Meta, marca aquí su estado real.</p>
+                        </div>
+                        <div>
+                            <label class="lbl">ID en Meta (si ya existe)</label>
+                            <input id="plantMetaId" type="text" placeholder="Ej: 1234567890" class="field input-glow" style="width:100%; padding:0.75rem 1rem; border-radius:10px; font-size:0.875rem;">
+                        </div>
+                    </div>
+                </div>
+                <div style="display:flex; gap:0.75rem; margin-top:1.5rem;">
+                    <button type="button" onclick="cerrarModal('modalPlantilla')" style="flex:1; padding:0.75rem; border-radius:10px; border:1px solid #2a2a35; background:none; color:#9ca3af; font-size:0.875rem; cursor:pointer; font-weight:500;" onmouseover="this.style.background='rgba(255,255,255,0.04)'" onmouseout="this.style.background='none'">
+                        Cancelar
+                    </button>
+                    <button type="submit" class="btn-gold" style="flex:2; padding:0.75rem; border-radius:10px; border:none; cursor:pointer; font-size:0.875rem; display:flex; align-items:center; justify-content:center; gap:6px;">
+                        <i class="fas fa-save"></i> Guardar plantilla
+                    </button>
+                </div>
+            </form>
+
+            <!-- Vista previa estilo WhatsApp -->
+            <div style="position:sticky; top:0;">
+                <label style="display:block; font-size:0.75rem; font-weight:600; color:#6b7280; margin-bottom:0.5rem; letter-spacing:0.05em;">VISTA PREVIA</label>
+                <div style="background:#0b141a; border:1px solid #1e1e26; border-radius:14px; padding:1rem;">
+                    <div style="background:#005c4b; border-radius:10px; padding:0.75rem 0.9rem; color:#e9edef; font-size:0.8rem; line-height:1.5;">
+                        <div id="previewCuerpo" style="white-space:pre-wrap;">Escribe el cuerpo para ver la vista previa</div>
+                        <div style="text-align:right; font-size:0.62rem; color:#8fd3c9; margin-top:4px;">12:00 <i class="fas fa-check-double" style="font-size:0.6rem;"></i></div>
+                    </div>
+                    <div id="previewBotones" style="display:flex; flex-direction:column; gap:4px; margin-top:6px;"></div>
+                </div>
+                <p id="previewAviso" style="display:none; font-size:0.68rem; color:#fbbf24; margin-top:0.5rem;"></p>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -865,6 +1021,7 @@ function mostrarDashboard() {
     document.getElementById('dashboard').style.display = 'flex';
     document.getElementById('sidebarUser').textContent = localStorage.getItem('adminUser') || 'Admin';
     aplicarRol();
+    aplicarMarcaReal();
     // Un usuario de empresa entra directo a sus números; el superadmin ve la plataforma.
     showSection(esSuperadminUI() ? 'empresas' : 'numeros');
 }
@@ -954,7 +1111,7 @@ async function apiFetch(method, path, body = null) {
 // ─────────────────────────────────────────────
 function showSection(sec) {
     // Nav items
-    ['empresas','miempresa','numeros','trabajadores','servicios','citas'].forEach(s => {
+    ['empresas','miempresa','numeros','plantillas','trabajadores','servicios','citas'].forEach(s => {
         const el = document.getElementById(`nav-${s}`);
         if (!el) return;
         el.classList.remove('active');
@@ -962,10 +1119,10 @@ function showSection(sec) {
     });
     const active = document.getElementById(`nav-${sec}`) || document.getElementById('nav-empresas');
     active.classList.add('active');
-    active.style.color = '#fbbf24';
+    active.style.color = 'var(--brand-text)';
 
     // Sections
-    ['Empresas','MiEmpresa','Numeros','Trabajadores','Servicios','Citas'].forEach(s => {
+    ['Empresas','MiEmpresa','Numeros','Plantillas','Trabajadores','Servicios','Citas'].forEach(s => {
         const el = document.getElementById(`sec${s}`);
         if (el) el.style.display = 'none';
     });
@@ -973,6 +1130,7 @@ function showSection(sec) {
         empresas: 'secEmpresas',
         miempresa: 'secMiEmpresa',
         numeros: 'secNumeros',
+        plantillas: 'secPlantillas',
         trabajadores: 'secTrabajadores',
         servicios: 'secServicios',
         citas: 'secCitas'
@@ -983,6 +1141,7 @@ function showSection(sec) {
     if (sec === 'empresas') cargarEmpresas();
     else if (sec === 'miempresa') cargarMiEmpresa();
     else if (sec === 'numeros') cargarEmpresas().then(poblarSelectorEmpresaNumeros);
+    else if (sec === 'plantillas') cargarEmpresas().then(poblarSelectorEmpresaPlantillas);
     else if (sec === 'trabajadores') cargarEmpresas().then(cargarTrabajadores);
     else if (sec === 'servicios') poblarSelectorEmpresaServicios();
     else if (sec === 'citas') cargarEmpresas().then(poblarSelectorEmpresaCitas);
@@ -991,15 +1150,6 @@ function showSection(sec) {
 // ─────────────────────────────────────────────
 // EMPRESAS
 // ─────────────────────────────────────────────
-async function cargarEmpresas() {
-    try {
-        const res = await apiFetch('GET', '/api/admin/empresas');
-        empresasCache = await res.json();
-        renderEmpresas();
-        renderMiEmpresa();
-    } catch (e) { if (e.message !== 'unauthorized') console.error(e); }
-}
-
 /** Vista "Mi Empresa": la empresa del usuario (propietario/staff). */
 function miEmpresaCache() {
     const id = empresaIdActual();
@@ -1026,7 +1176,7 @@ function renderMiEmpresa() {
             <div style="display:flex; align-items:flex-start; gap:1.25rem; flex-wrap:wrap;">
                 ${emp.logo_url
                     ? `<img src="${escHtml(emp.logo_url)}" alt="Logo" style="width:64px; height:64px; border-radius:14px; object-fit:cover; border:1px solid #2a2a35;">`
-                    : `<div style="width:64px; height:64px; border-radius:14px; background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.25); display:flex; align-items:center; justify-content:center;"><i class="fas fa-store" style="color:#f59e0b;"></i></div>`}
+                    : `<div style="width:64px; height:64px; border-radius:14px; background:var(--brand-soft); border:1px solid var(--brand-line); display:flex; align-items:center; justify-content:center;"><i class="fas fa-store" style="color:var(--brand);"></i></div>`}
                 <div style="flex:1; min-width:200px;">
                     <h3 style="font-size:1.15rem; font-weight:800; color:#fff; margin:0 0 4px;">${escHtml(emp.nombre)}</h3>
                     ${emp.descripcion ? `<p style="font-size:0.82rem; color:#9ca3af; margin:0 0 8px;">${escHtml(emp.descripcion)}</p>` : ''}
@@ -1065,6 +1215,7 @@ async function cargarEmpresas() {
         // se llama a renderMiEmpresa, la pantalla del propietario se
         // queda con el spinner para siempre (bug del piloto).
         renderMiEmpresa();
+        aplicarMarcaReal();
     } catch (e) { if (e.message !== 'unauthorized') console.error(e); }
 }
 
@@ -1086,8 +1237,8 @@ function renderEmpresas() {
         <div class="card fade-in" style="margin-bottom:1rem; padding:1.5rem;">
             <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:1rem;">
                 <div style="display:flex; align-items:center; gap:1rem; flex:1; min-width:0;">
-                    <div style="width:48px; height:48px; border-radius:12px; background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.25); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-                        <i class="fas fa-store" style="color:#f59e0b;"></i>
+                    <div style="width:48px; height:48px; border-radius:12px; background:${emp.color_primario ? emp.color_primario + '1a' : 'rgba(245,158,11,0.1)'}; border:1px solid ${emp.color_primario ? emp.color_primario + '40' : 'rgba(245,158,11,0.25)'}; display:flex; align-items:center; justify-content:center; flex-shrink:0; overflow:hidden;">
+                        ${emp.logo_url ? `<img src="${escHtml(emp.logo_url)}" alt="" style="width:100%; height:100%; object-fit:cover;">` : `<i class="fas fa-store" style="color:${emp.color_primario || '#f59e0b'};"></i>`}
                     </div>
                     <div style="min-width:0;">
                         <h3 style="font-size:1rem; font-weight:700; color:#fff; margin:0 0 3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escHtml(emp.nombre)}</h3>
@@ -1113,10 +1264,153 @@ function renderEmpresas() {
     `).join('');
 }
 
+// ─────────────────────────────────────────────
+// MARCA POR EMPRESA: tema dinámico + logo
+// Hoy el logo viaja embebido (dataURL redimensionada a 256 px)
+// dentro de logo_url. Cuando exista el bucket `marcas` de Supabase
+// Storage, cargarLogoArchivo() subirá el archivo y guardará la URL
+// pública en el mismo campo: nada más del panel cambia.
+// ─────────────────────────────────────────────
+function hexARgb(h) {
+    const m = /^#?([0-9a-f]{6})$/i.exec((h || '').trim());
+    if (!m) return null;
+    const n = parseInt(m[1], 16);
+    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+function mezclar(h, destino, k) {
+    const c = hexARgb(h); if (!c) return destino;
+    const t = hexARgb(destino) || { r: 0, g: 0, b: 0 };
+    return '#' + [c.r + (t.r - c.r) * k, c.g + (t.g - c.g) * k, c.b + (t.b - c.b) * k]
+        .map(x => Math.round(x).toString(16).padStart(2, '0')).join('');
+}
+function rgbaDe(h, a) {
+    const c = hexARgb(h); if (!c) return `rgba(245,158,11,${a})`;
+    return `rgba(${c.r},${c.g},${c.b},${a})`;
+}
+function luminosidad(h) {
+    const c = hexARgb(h); if (!c) return 0.5;
+    return (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) / 255;
+}
+
+/** Pinta el tema de marca sobre las variables CSS. null = defaults SlotBrain. */
+function aplicarTemaMarca(emp) {
+    const st = document.documentElement.style;
+    const props = ['--brand', '--brand-2', '--brand-hover', '--brand-text', '--brand-ink', '--brand-soft', '--brand-line', '--brand-glow'];
+    const hex = emp && hexARgb(emp.color_primario) ? emp.color_primario.trim() : null;
+    if (!hex) { props.forEach(p => st.removeProperty(p)); return; }
+    st.setProperty('--brand', hex);
+    st.setProperty('--brand-2', mezclar(hex, '#000000', 0.18));
+    st.setProperty('--brand-hover', mezclar(hex, '#ffffff', 0.22));
+    st.setProperty('--brand-text', mezclar(hex, '#ffffff', 0.3));
+    st.setProperty('--brand-ink', luminosidad(hex) > 0.55 ? '#0a0a0b' : '#ffffff');
+    st.setProperty('--brand-soft', rgbaDe(hex, 0.12));
+    st.setProperty('--brand-line', rgbaDe(hex, 0.28));
+    st.setProperty('--brand-glow', rgbaDe(hex, 0.35));
+}
+
+/** Logo + nombre del sidebar según la empresa en sesión (null = SlotBrain). */
+function renderMarcaSidebar(emp) {
+    const img = document.getElementById('sidebarLogoImg');
+    const svg = document.getElementById('sidebarLogoDefault');
+    const nameEl = document.getElementById('sidebarBrandName');
+    const powered = document.getElementById('sidebarPowered');
+    if (emp && emp.logo_url) {
+        img.onerror = () => { img.style.display = 'none'; svg.style.display = ''; };
+        img.src = emp.logo_url;
+        img.style.display = 'block'; svg.style.display = 'none';
+    } else {
+        img.style.display = 'none'; svg.style.display = '';
+    }
+    if (emp) {
+        nameEl.textContent = emp.nombre || 'Mi empresa';
+        if (powered) powered.style.display = '';
+    } else {
+        nameEl.innerHTML = 'slot<span style="color:var(--brand);">brain</span>';
+        if (powered) powered.style.display = 'none';
+    }
+}
+
+/** Empresa cuya marca debe verse ahora mismo (null si es superadmin). */
+function empresaDeSesion() {
+    if (esSuperadminUI()) return null;
+    return miEmpresaCache();
+}
+
+function aplicarMarcaReal() {
+    const emp = empresaDeSesion();
+    aplicarTemaMarca(emp);
+    renderMarcaSidebar(emp);
+}
+
+/** Vista previa en vivo mientras se edita la marca (se revierte al cerrar). */
+function previewTemaMarca() {
+    const emp = {
+        color_primario: document.getElementById('empColorHex').value.trim(),
+        logo_url: document.getElementById('empLogoUrl').value.trim() || null,
+        nombre: document.getElementById('empNombre').value.trim() || 'Mi empresa'
+    };
+    aplicarTemaMarca(emp);
+    renderMarcaSidebar(emp);
+}
+
+function cerrarModalEmpresa() {
+    cerrarModal('modalEmpresa');
+    aplicarMarcaReal();
+}
+
+/** Sube la imagen al bucket `marcas` (si la empresa ya existe) o la deja embebida. */
+async function cargarLogoArchivo(input) {
+    const f = input.files && input.files[0];
+    if (!f) return;
+    if (!/^image\//.test(f.type)) { showToast('Ese archivo no es una imagen', 'error'); input.value = ''; return; }
+    if (f.size > 5 * 1024 * 1024) { showToast('Imagen muy grande (máx. 5 MB)', 'error'); return; }
+    const img = new Image();
+    img.onload = async () => {
+        const MAX = 256;
+        let w = img.width, h = img.height;
+        if (w > MAX || h > MAX) {
+            const k = MAX / Math.max(w, h);
+            w = Math.max(1, Math.round(w * k));
+            h = Math.max(1, Math.round(h * k));
+        }
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        cv.getContext('2d').drawImage(img, 0, 0, w, h);
+        const tipo = (f.type === 'image/png' || f.type === 'image/webp') ? f.type : 'image/jpeg';
+        const dataUrl = cv.toDataURL(tipo, 0.85);
+        URL.revokeObjectURL(img.src);
+        document.getElementById('empLogoUrl').value = dataUrl;
+        refrescarPreviewLogo();
+        previewTemaMarca();
+        if (editingEmpresaId) {
+            try {
+                showToast('Subiendo logo…');
+                const res = await apiFetch('POST', `/api/admin/empresas/${editingEmpresaId}/logo`, { data_url: dataUrl });
+                if (!res.ok) {
+                    const e = await res.json().catch(() => ({}));
+                    throw new Error(e.error || 'HTTP ' + res.status);
+                }
+                const d = await res.json();
+                document.getElementById('empLogoUrl').value = d.url;
+                refrescarPreviewLogo();
+                previewTemaMarca();
+                showToast('Logo subido ✓');
+            } catch (err) {
+                // Sin bucket todavía (local sin configurar): la imagen viaja embebida al guardar.
+                showToast('No se pudo subir al storage (' + err.message + '); se guardará embebida', 'error');
+            }
+        } else {
+            showToast('Logo cargado ✓ — la subida al storage ocurre cuando la empresa ya exista');
+        }
+    };
+    img.onerror = () => { URL.revokeObjectURL(img.src); showToast('No se pudo leer la imagen', 'error'); };
+    img.src = URL.createObjectURL(f);
+}
+
 function refrescarPreviewLogo() {
     const url = document.getElementById('empLogoUrl').value.trim();
     const img = document.getElementById('empLogoPreview');
-    if (url && url.startsWith('http')) {
+    if (url && (url.startsWith('http') || url.startsWith('data:image'))) {
         img.src = url;
         img.style.display = 'block';
         img.onerror = () => { img.style.display = 'none'; };
@@ -1133,9 +1427,11 @@ function abrirModalEmpresa() {
     document.getElementById('empZona').value = 'America/Bogota';
     document.getElementById('empMoneda').value = 'COP';
     document.getElementById('empColorHex').value = '#f59e0b';
+    document.getElementById('empColor').value = '#f59e0b';
     document.getElementById('empProfHoras').value = 24;
     document.getElementById('empCliHoras').value = 2;
     document.getElementById('empLogoPreview').style.display = 'none';
+    document.getElementById('empLogoFile').value = '';
     // Solo el superadmin que crea la empresa nueva puede ligar a su propietario.
     document.getElementById('bloqueAdminEmail').style.display = esSuperadminUI() ? 'block' : 'none';
     abrirModal('modalEmpresa');
@@ -1155,8 +1451,10 @@ function editarEmpresa(id) {
     document.getElementById('empBienvenida').value = emp.mensaje_bienvenida || '';
     document.getElementById('empConfirmacion').value = emp.mensaje_confirmacion || '';
     document.getElementById('empLogoUrl').value = emp.logo_url || '';
+    document.getElementById('empLogoFile').value = '';
     refrescarPreviewLogo();
     document.getElementById('empColorHex').value = emp.color_primario || '#f59e0b';
+    document.getElementById('empColor').value = hexARgb(emp.color_primario) ? emp.color_primario.trim() : '#f59e0b';
     document.getElementById('empMoneda').value = emp.moneda || 'COP';
     const pol = emp.politicas || {};
     document.getElementById('empProfHoras').value = pol.recordatorio_profesional_horas ?? 24;
@@ -1234,7 +1532,7 @@ document.getElementById('formEmpresa').addEventListener('submit', async (e) => {
         }
         if (res.ok) {
             const creada = await res.json();
-            cerrarModal('modalEmpresa');
+            cerrarModalEmpresa();
             showToast(editingEmpresaId ? 'Empresa actualizada ✓' : 'Empresa creada ✓');
 
             // La clave temporal SE MUESTRA UNA SOLA VEZ: el hash guardado
@@ -1259,14 +1557,14 @@ function mostrarClaveTemporal(email, clave) {
     const html = `
         <div class="modal-box" style="width:100%; max-width:460px; padding:2rem;">
             <div style="text-align:center; margin-bottom:1.25rem;">
-                <div style="display:inline-flex; align-items:center; justify-content:center; width:52px; height:48px; border-radius:14px; background:linear-gradient(135deg,#f59e0b,#d97706);">
+                <div style="display:inline-flex; align-items:center; justify-content:center; width:52px; height:48px; border-radius:14px; background:linear-gradient(135deg,var(--brand),var(--brand-2));">
                     <svg style="width:30px; height:28px;"><use href="#sbLogoInk"/></svg>
                 </div>
                 <h3 style="font-size:1.05rem; font-weight:700; color:#fff; margin:0.9rem 0 4px;">Propietario creado: ${escHtml(email)}</h3>
                 <p style="font-size:0.75rem; color:#9ca3af; margin:0;">Esta es su clave temporal. <strong>Se muestra una sola vez</strong>: entrégasela al dueño para que entre al panel y la cambie en su primer inicio de sesión.</p>
             </div>
-            <div style="background:#0d0d10; border:1px dashed #f59e0b; border-radius:12px; padding:1rem; text-align:center; margin-bottom:1.25rem;">
-                <code id="claveTemporalValor" style="font-size:1.5rem; font-weight:800; color:#fbbf24; letter-spacing:3px;">${escHtml(clave)}</code>
+            <div style="background:#0d0d10; border:1px dashed var(--brand); border-radius:12px; padding:1rem; text-align:center; margin-bottom:1.25rem;">
+                <code id="claveTemporalValor" style="font-size:1.5rem; font-weight:800; color:var(--brand-text); letter-spacing:3px;">${escHtml(clave)}</code>
             </div>
             <div style="display:flex; gap:0.75rem;">
                 <button type="button" onclick="copiarClaveTemporal()" class="btn-gold" style="flex:2; padding:0.75rem; border-radius:10px; border:none; cursor:pointer; font-size:0.85rem;">
@@ -1357,7 +1655,7 @@ function renderTrabajadores() {
                 <button onclick="desconectarCalendar('${t.id}', '${escHtml(t.nombre || 'este profesional')}')" style="background:rgba(239,68,68,0.07); border:1px solid rgba(239,68,68,0.2); color:#f87171; padding:6px 12px; border-radius:8px; cursor:pointer; font-size:0.74rem;" onmouseover="this.style.background='rgba(239,68,68,0.15)'" onmouseout="this.style.background='rgba(239,68,68,0.07)'">
                     <i class="fas fa-unlink" style="margin-right:5px;"></i>Desconectar
                 </button>` : `
-                <button onclick="copiarEnlaceCalendar('${t.id}')" style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.3); color:#f59e0b; padding:6px 12px; border-radius:8px; cursor:pointer; font-size:0.74rem; font-weight:600;" onmouseover="this.style.background='rgba(245,158,11,0.2)'" onmouseout="this.style.background='rgba(245,158,11,0.12)'">
+                <button onclick="copiarEnlaceCalendar('${t.id}')" style="background:var(--brand-soft); border:1px solid var(--brand-line); color:var(--brand); padding:6px 12px; border-radius:8px; cursor:pointer; font-size:0.74rem; font-weight:600;" onmouseover="this.style.background='var(--brand-glow)'" onmouseout="this.style.background='var(--brand-soft)'">
                     <i class="fas fa-link" style="margin-right:5px;"></i>Copiar enlace de calendar
                 </button>`}
             </div>
@@ -1511,7 +1809,7 @@ async function abrirModalServiciosTrab(trabajadorId, nombre) {
         lista.innerHTML = servicios.map(s => `
             <label style="display:flex; align-items:center; gap:0.75rem; padding:0.7rem 0.9rem; border-radius:10px; background:rgba(255,255,255,0.03); border:1px solid #2a2a35; cursor:pointer;">
                 <input type="checkbox" value="${s.id}" ${serviciosTrabActual.marcados.has(s.id) ? 'checked' : ''}
-                    style="width:16px; height:16px; accent-color:#f59e0b; cursor:pointer;">
+                    style="width:16px; height:16px; accent-color:var(--brand); cursor:pointer;">
                 <span style="flex:1; font-size:0.85rem; color:#d1d5db;">${escHtml(s.nombre)}</span>
                 <span style="font-size:0.75rem; color:#4b5563;">${s.duracion_minutos || 60} min</span>
                 ${s.activo === false ? '<span style="font-size:0.7rem; color:#f87171;">inactivo</span>' : ''}
@@ -1648,14 +1946,14 @@ function renderServicios() {
     el.innerHTML = serviciosCache.map(s => `
         <div class="card fade-in" style="margin-bottom:0.75rem; padding:1.1rem 1.25rem; display:flex; align-items:center; justify-content:space-between; gap:1rem;">
             <div style="display:flex; align-items:center; gap:12px; min-width:0;">
-                <div style="width:40px; height:40px; border-radius:10px; background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.2); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-                    <i class="fas fa-cut" style="color:#f59e0b; font-size:0.85rem;"></i>
+                <div style="width:40px; height:40px; border-radius:10px; background:var(--brand-soft); border:1px solid var(--brand-line); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                    <i class="fas fa-cut" style="color:var(--brand); font-size:0.85rem;"></i>
                 </div>
                 <div style="min-width:0;">
                     <h4 style="font-size:0.875rem; font-weight:600; color:#fff; margin:0 0 2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escHtml(s.nombre)}</h4>
                     ${s.descripcion ? `<p style="font-size:0.75rem; color:#6b7280; margin:0 0 4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escHtml(s.descripcion)}</p>` : ''}
                     <div style="display:flex; align-items:center; gap:12px;">
-                        <span style="font-size:0.78rem; font-weight:700; color:#f59e0b;">$${Number(s.precio).toLocaleString('es-CO')} COP</span>
+                        <span style="font-size:0.78rem; font-weight:700; color:var(--brand);">$${Number(s.precio).toLocaleString('es-CO')} COP</span>
                         <span style="font-size:0.72rem; color:#4b5563;"><i class="fas fa-clock" style="margin-right:3px;"></i>${s.duracion_minutos} min</span>
                     </div>
                 </div>
@@ -1995,12 +2293,325 @@ async function eliminarNumero(id, telefono) {
 }
 
 // ─────────────────────────────────────────────
+// PLANTILLAS DE WHATSAPP
+// ─────────────────────────────────────────────
+let plantillasCache = [];
+let plantillaEditandoId = null;
+// Valores de ejemplo por variable {{n}}, se conservan al editar el cuerpo.
+const plantEjemplosValores = {};
+
+async function poblarSelectorEmpresaPlantillas() {
+    const sel = document.getElementById('selectorEmpresaPlantillas');
+    const contenedor = document.getElementById('contenedorSelectorPlantillas');
+    const btn = document.getElementById('btnNuevaPlantilla');
+    const empresaDeUsuario = empresaIdActual();
+
+    if (!esSuperadminUI() && empresaDeUsuario) {
+        // Usuario de empresa: NADA de selector, su empresa es fija y su
+        // lista carga de una.
+        contenedor.style.display = 'none';
+        btn.style.display = 'flex';
+        await cargarPlantillas(empresaDeUsuario);
+        return;
+    }
+
+    contenedor.style.display = 'block';
+    sel.innerHTML = '<option value="">— Selecciona una empresa —</option>';
+    empresasCache.forEach(e => {
+        sel.innerHTML += `<option value="${e.id}">${escHtml(e.nombre)}</option>`;
+    });
+    document.getElementById('listaPlantillas').innerHTML = '';
+    btn.style.display = 'none';
+}
+
+async function onEmpresaPlantillasChange() {
+    const id = document.getElementById('selectorEmpresaPlantillas').value;
+    const btn = document.getElementById('btnNuevaPlantilla');
+
+    if (!id) {
+        btn.style.display = 'none';
+        document.getElementById('listaPlantillas').innerHTML = '';
+        return;
+    }
+    btn.style.display = 'flex';
+    await cargarPlantillas(id);
+}
+
+async function cargarPlantillas(empresaId) {
+    const el = document.getElementById('listaPlantillas');
+    try {
+        const res = await apiFetch('GET', `/api/admin/plantillas/${empresaId}`);
+        if (!res.ok) {
+            el.innerHTML = '<p style="color:#f87171; font-size:0.85rem;">No se pudieron cargar las plantillas.</p>';
+            return;
+        }
+        plantillasCache = await res.json();
+        renderPlantillas();
+    } catch (e) {
+        if (e.message !== 'unauthorized') {
+            el.innerHTML = '<p style="color:#f87171; font-size:0.85rem;">Error de conexión.</p>';
+        }
+    }
+}
+
+/** Empresa del contexto de la sección Plantillas. */
+function empresaIdDePlantillas() {
+    return esSuperadminUI()
+        ? document.getElementById('selectorEmpresaPlantillas').value
+        : empresaIdActual();
+}
+
+const ESTADOS_PLANTILLA_UI = {
+    borrador:   { clase: 'badge-gray',  texto: 'Borrador' },
+    enviada:    { clase: 'badge-amber', texto: 'Enviada a Meta' },
+    aprobada:   { clase: 'badge-green', texto: 'Aprobada ✓' },
+    rechazada:  { clase: 'badge-red',   texto: 'Rechazada' },
+    pausada:    { clase: 'badge-gray',  texto: 'Pausada' }
+};
+
+function renderPlantillas() {
+    const el = document.getElementById('listaPlantillas');
+
+    if (!plantillasCache.length) {
+        el.innerHTML = `
+            <div style="text-align:center; padding:3rem 0;">
+                <i class="fas fa-file-alt" style="font-size:2.5rem; margin-bottom:1rem; display:block; color:#1f2937;"></i>
+                <p style="color:#9ca3af; margin-bottom:1.25rem;">Esta empresa no tiene plantillas registradas todavía.</p>
+                <button onclick="abrirModalPlantilla()" class="btn-gold" style="padding:0.75rem 1.5rem; border-radius:12px; border:none; cursor:pointer; font-size:0.85rem; font-weight:600; display:inline-flex; align-items:center; gap:8px;">
+                    <i class="fas fa-plus"></i> Crear la primera plantilla
+                </button>
+            </div>`;
+        return;
+    }
+
+    el.innerHTML = plantillasCache.map(p => {
+        const estado = ESTADOS_PLANTILLA_UI[p.estado] || ESTADOS_PLANTILLA_UI.borrador;
+        return `
+        <div class="card fade-in" style="margin-bottom:0.75rem; padding:1.1rem 1.25rem;">
+            <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:1rem;">
+                <div style="min-width:0; flex:1;">
+                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:5px;">
+                        <h4 style="font-size:0.9rem; font-weight:700; color:#fff; margin:0; font-family:monospace;">${escHtml(p.nombre)}</h4>
+                        <span class="${estado.clase}" style="padding:2px 8px; border-radius:99px; font-size:0.68rem;">${estado.texto}</span>
+                        <span class="badge-amber" style="padding:2px 8px; border-radius:99px; font-size:0.68rem;">${escHtml(p.categoria)}</span>
+                        <span style="font-size:0.72rem; color:#6b7280;">idioma: ${escHtml(p.idioma)}</span>
+                    </div>
+                    <p style="font-size:0.8rem; color:#9ca3af; margin:0 0 6px; white-space:pre-wrap;">${escHtml(p.cuerpo)}</p>
+                    <div style="display:flex; flex-wrap:wrap; gap:10px; font-size:0.72rem; color:#6b7280;">
+                        ${(p.ejemplos || []).length ? `<span><i class="fas fa-brackets-curly" style="margin-right:4px;"></i>${p.ejemplos.length} variable${p.ejemplos.length > 1 ? 's' : ''} con ejemplo</span>` : '<span>sin variables</span>'}
+                        ${(p.botones || []).length ? `<span><i class="fas fa-hand-pointer" style="margin-right:4px;"></i>${p.botones.length} botón${p.botones.length > 1 ? 'es' : ''}</span>` : ''}
+                        ${p.meta_id ? `<span style="font-family:monospace;">Meta ID: ${escHtml(p.meta_id)}</span>` : ''}
+                        ${p.motivo_rechazo ? `<span style="color:#fca5a5;" title="${escHtml(p.motivo_rechazo)}"><i class="fas fa-triangle-exclamation"></i> rechazo de Meta</span>` : ''}
+                    </div>
+                </div>
+                <div style="display:flex; gap:6px; flex-shrink:0;">
+                    <button onclick="editarPlantilla('${p.id}')" title="Editar" style="background:rgba(255,255,255,0.04); border:1px solid #2a2a35; color:#9ca3af; padding:6px 10px; border-radius:8px; cursor:pointer; font-size:0.78rem;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#9ca3af'">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button onclick="eliminarPlantilla('${p.id}', '${escHtml(p.nombre)}')" title="Eliminar" style="background:rgba(239,68,68,0.07); border:1px solid rgba(239,68,68,0.2); color:#f87171; padding:6px 10px; border-radius:8px; cursor:pointer; font-size:0.78rem;" onmouseover="this.style.background='rgba(239,68,68,0.15)'" onmouseout="this.style.background='rgba(239,68,68,0.07)'">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function abrirModalPlantilla() {
+    plantillaEditandoId = null;
+    document.getElementById('modalPlantillaTitulo').textContent = 'Nueva plantilla';
+    document.getElementById('formPlantilla').reset();
+    document.getElementById('plantillaIdInput').value = '';
+    document.getElementById('plantIdioma').value = 'es';
+    document.getElementById('plantEstado').value = 'borrador';
+    Object.keys(plantEjemplosValores).forEach(k => delete plantEjemplosValores[k]);
+    actualizarEjemplos();
+    actualizarPreview();
+    abrirModal('modalPlantilla');
+}
+
+function editarPlantilla(id) {
+    const p = plantillasCache.find(x => x.id === id);
+    if (!p) return;
+
+    plantillaEditandoId = id;
+    document.getElementById('modalPlantillaTitulo').textContent = 'Editar plantilla';
+    document.getElementById('plantillaIdInput').value = p.id;
+    document.getElementById('plantNombre').value = p.nombre || '';
+    document.getElementById('plantIdioma').value = p.idioma || 'es';
+    document.getElementById('plantCategoria').value = p.categoria || 'UTILITY';
+    document.getElementById('plantCuerpo').value = p.cuerpo || '';
+    document.getElementById('plantEstado').value = p.estado || 'borrador';
+    document.getElementById('plantMetaId').value = p.meta_id || '';
+
+    const botones = p.botones || [];
+    const rapidos = botones.filter(b => b.tipo === 'QUICK_REPLY');
+    const url = botones.find(b => b.tipo === 'URL');
+    document.getElementById('plantBoton1').value = rapidos[0]?.texto || '';
+    document.getElementById('plantBoton2').value = rapidos[1]?.texto || '';
+    document.getElementById('plantBoton3').value = rapidos[2]?.texto || '';
+    document.getElementById('plantUrlTexto').value = url?.texto || '';
+    document.getElementById('plantUrlEnlace').value = url?.url || '';
+
+    Object.keys(plantEjemplosValores).forEach(k => delete plantEjemplosValores[k]);
+    (p.ejemplos || []).forEach((v, i) => { plantEjemplosValores[String(i + 1)] = v || ''; });
+
+    actualizarEjemplos();
+    actualizarPreview();
+    abrirModal('modalPlantilla');
+}
+
+/** Índices {{n}} que el cuerpo usa, ordenados y sin repetir (misma regla que el servidor). */
+function variablesDeCuerpoUI(cuerpo) {
+    const nums = [...String(cuerpo).matchAll(/\{\{\s*(\d+)\s*\}\}/g)].map(m => parseInt(m[1], 10));
+    return [...new Set(nums)].sort((a, b) => a - b);
+}
+
+/** Dibuja un input de ejemplo por cada variable detectada en el cuerpo. */
+function actualizarEjemplos() {
+    const cont = document.getElementById('plantEjemplos');
+    const vars = variablesDeCuerpoUI(document.getElementById('plantCuerpo').value);
+
+    if (!vars.length) {
+        cont.innerHTML = '<p style="font-size:0.72rem; color:#4b5563; margin:0;">El cuerpo no usa variables {{n}}.</p>';
+        return;
+    }
+
+    cont.innerHTML = vars.map(n => `
+        <div style="display:flex; align-items:center; gap:0.75rem;">
+            <span style="font-family:monospace; color:var(--brand-text); font-size:0.78rem; min-width:44px;">{{${n}}}</span>
+            <input id="plantEjemplo_${n}" type="text" maxlength="100" placeholder="Ejemplo: Valentina / 2026-11-20 / 3:00 pm"
+                class="field input-glow" style="flex:1; padding:0.55rem 0.8rem; border-radius:8px; font-size:0.78rem;"
+                value="${escHtml(plantEjemplosValores[String(n)] || '')}"
+                oninput="plantEjemplosValores['${n}'] = this.value; actualizarPreview();">
+        </div>`).join('');
+}
+
+function valoresEjemplosUI() {
+    const vars = variablesDeCuerpoUI(document.getElementById('plantCuerpo').value);
+    return vars.map(n => (plantEjemplosValores[String(n)] || '').trim());
+}
+
+/** Vista previa estilo WhatsApp con ejemplos y botones en vivo. */
+function actualizarPreview() {
+    const cuerpo = document.getElementById('plantCuerpo').value;
+    const ejemplos = valoresEjemplosUI();
+    const vars = variablesDeCuerpoUI(cuerpo);
+
+    // Sustituye {{n}} por el ejemplo si existe; si no, deja {{n}} visible.
+    const preview = cuerpo.replace(/\{\{\s*(\d+)\s*\}\}/g, (_, n) => {
+        const idx = vars.indexOf(parseInt(n, 10));
+        const val = ejemplos[idx];
+        return (val && val !== '') ? val : `{{${n}}}`;
+    });
+    document.getElementById('previewCuerpo').textContent = preview || 'Escribe el cuerpo para ver la vista previa';
+
+    // Botones
+    const botones = [];
+    for (const idSel of ['plantBoton1', 'plantBoton2', 'plantBoton3']) {
+        const t = document.getElementById(idSel).value.trim();
+        if (t) botones.push(t);
+    }
+    const urlTexto = document.getElementById('plantUrlTexto').value.trim();
+    const urlEnlace = document.getElementById('plantUrlEnlace').value.trim();
+    if (urlTexto || urlEnlace) botones.push(`${urlTexto || 'URL'} ↗`);
+
+    document.getElementById('previewBotones').innerHTML = botones.map(t => `
+        <div style="background:#1f2c33; border:1px solid #2a3a42; border-radius:8px; padding:0.5rem 0.9rem; text-align:center; color:#53bdeb; font-size:0.75rem;">${escHtml(t)}</div>
+    `).join('');
+
+    // Avisos en vivo (las mismas reglas que valida el servidor)
+    const avisos = [];
+    if (cuerpo.length > 1024) avisos.push('El cuerpo pasa de 1024 caracteres (límite de Meta).');
+    const seguidos = vars.every((v, i) => v === i + 1);
+    if (!seguidos && vars.length) {
+        const falta = vars.findIndex((v, i) => v !== i + 1) + 1;
+        avisos.push(`Las variables deben ser consecutivas desde {{1}}: falta {{${falta}}}.`);
+    }
+    if (botones.length > 3) avisos.push('Máximo 3 botones por plantilla.');
+
+    const avisoEl = document.getElementById('previewAviso');
+    avisoEl.textContent = avisos.join(' ');
+    avisoEl.style.display = avisos.length ? 'block' : 'none';
+}
+
+/** Arma el array de botones desde los inputs del modal. */
+function botonesDeFormulario() {
+    const botones = [];
+    for (const idSel of ['plantBoton1', 'plantBoton2', 'plantBoton3']) {
+        const texto = document.getElementById(idSel).value.trim();
+        if (texto) botones.push({ tipo: 'QUICK_REPLY', texto });
+    }
+    const urlTexto = document.getElementById('plantUrlTexto').value.trim();
+    const urlEnlace = document.getElementById('plantUrlEnlace').value.trim();
+    if (urlTexto || urlEnlace) {
+        botones.push({ tipo: 'URL', texto: urlTexto || 'Ver', url: urlEnlace });
+    }
+    return botones;
+}
+
+document.getElementById('formPlantilla').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    // Usuario de empresa: SU empresa fija; el selector solo existe para superadmin.
+    const empresaId = empresaIdDePlantillas();
+    const nombre = document.getElementById('plantNombre').value.trim();
+    const cuerpo = document.getElementById('plantCuerpo').value;
+
+    if (!empresaId) { showToast('Selecciona una empresa', 'error'); return; }
+    if (!nombre) { showToast('El nombre de la plantilla es requerido', 'error'); return; }
+    if (!cuerpo.trim()) { showToast('El cuerpo del mensaje es requerido', 'error'); return; }
+
+    const payload = {
+        nombre,
+        idioma: document.getElementById('plantIdioma').value.trim() || 'es',
+        categoria: document.getElementById('plantCategoria').value,
+        cuerpo,
+        ejemplos: valoresEjemplosUI(),
+        botones: botonesDeFormulario(),
+        estado: document.getElementById('plantEstado').value,
+        meta_id: document.getElementById('plantMetaId').value.trim() || null
+    };
+
+    try {
+        const res = plantillaEditandoId
+            ? await apiFetch('PUT', `/api/admin/plantillas/${plantillaEditandoId}`, payload)
+            : await apiFetch('POST', `/api/admin/plantillas/${empresaId}`, payload);
+
+        if (res.ok) {
+            cerrarModal('modalPlantilla');
+            showToast(plantillaEditandoId ? 'Plantilla actualizada ✓' : 'Plantilla guardada ✓');
+            await cargarPlantillas(empresaId);
+        } else {
+            const err = await res.json();
+            showToast(err.error || 'Error al guardar', 'error');
+        }
+    } catch (err) {
+        if (err.message !== 'unauthorized') showToast('Error de conexión', 'error');
+    }
+});
+
+async function eliminarPlantilla(id, nombre) {
+    if (!confirm(`¿Eliminar la plantilla "${nombre}"?\n\nSi ya está creada en Meta, bórrala también allá desde tu Meta Business.`)) return;
+    try {
+        const res = await apiFetch('DELETE', `/api/admin/plantillas/${id}`);
+        if (res.ok) {
+            showToast('Plantilla eliminada');
+            await cargarPlantillas(empresaIdDePlantillas());
+        } else {
+            const err = await res.json();
+            showToast(err.error || 'Error al eliminar', 'error');
+        }
+    } catch (e) { if (e.message !== 'unauthorized') showToast('Error de conexión', 'error'); }
+}
+
+// ─────────────────────────────────────────────
 // CITAS
 // ─────────────────────────────────────────────
 let citasCache = [];
 
 const COLORES_ESTADO = {
-    agendada:    { bg: 'rgba(245,158,11,0.12)', bd: 'rgba(245,158,11,0.3)',  fg: '#fbbf24' },
+    agendada:    { bg: 'var(--brand-soft)', bd: 'var(--brand-line)',  fg: 'var(--brand-text)' },
     confirmada:  { bg: 'rgba(34,197,94,0.12)',  bd: 'rgba(34,197,94,0.3)',  fg: '#86efac' },
     completada:  { bg: 'rgba(59,130,246,0.12)', bd: 'rgba(59,130,246,0.3)', fg: '#93c5fd' },
     cancelada:   { bg: 'rgba(239,68,68,0.1)',   bd: 'rgba(239,68,68,0.25)', fg: '#fca5a5' },
@@ -2156,13 +2767,13 @@ function cerrarModal(id) {
 
 // Close modals on backdrop click
 document.querySelectorAll('.modal-bg').forEach(m => {
-    m.addEventListener('click', (e) => { if (e.target === m) cerrarModal(m.id); });
+    m.addEventListener('click', (e) => { if (e.target === m) { if (m.id === 'modalEmpresa') cerrarModalEmpresa(); else cerrarModal(m.id); } });
 });
 
 // Escape key closes modals
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-        ['modalEmpresa','modalNumero','modalTrabajador','modalServiciosTrab','modalBloqueo','modalServicio'].forEach(cerrarModal);
+        ['modalEmpresa','modalNumero','modalPlantilla','modalTrabajador','modalServiciosTrab','modalBloqueo','modalServicio'].forEach(cerrarModal);
     }
 });
 

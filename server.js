@@ -17,6 +17,7 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
 // Guardamos el rawBody porque lo necesitamos para verificar la firma
 // que Meta envía en cada POST del webhook (X-Hub-Signature-256).
 app.use(express.json({
+    limit: '3mb', // logos embebidos como dataURL (reducidos a 256px en el panel)
     verify: (req, res, buf) => { req.rawBody = buf; }
 }));
 app.use(express.static(path.join(__dirname, 'public')));
