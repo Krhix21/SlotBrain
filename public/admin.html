@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>SlotBrain — Panel Admin</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="alternate icon" type="image/png" href="/favicon-64.png">
@@ -13,7 +13,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         *, *::before, *::after { box-sizing: border-box; }
-        body { font-family: 'Inter', system-ui, sans-serif; margin: 0; }
+        body { font-family: 'Inter', system-ui, sans-serif; margin: 0; -webkit-tap-highlight-color: transparent; }
 
         /* ── Tema de marca (se sobreescribe por empresa con JS; default = SlotBrain ámbar) ── */
         :root {
@@ -92,6 +92,106 @@
         .dot-green { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.7); }
         .dot-red   { background: #ef4444; }
         .dot-gray  { background: #4b5563; }
+
+        /* ══ RESPONSIVE MÓVIL ══════════════════════════════════════════
+           El panel usa estilos inline por todas partes (histórico del
+           proyecto), así que las reglas de móvil van con !important a
+           propósito. Topbar + drawer solo en pantallas ≤ 900 px.
+        ══════════════════════════════════════════════════════════════ */
+        #mobileTopbar, #sidebarOverlay { display: none; }
+        .sec-head { flex-wrap: wrap; }
+
+        @media (max-width: 900px) {
+            /* El scroll pasa a ser del body: evita el problema del
+               100vh con barras de navegador móviles. */
+            #dashboard { height: auto !important; min-height: 100dvh !important; }
+
+            /* Topbar fija con botón de menú + título de sección */
+            #mobileTopbar {
+                display: flex; position: fixed; top: 0; left: 0; right: 0; z-index: 65;
+                align-items: center; gap: 10px;
+                padding: calc(9px + env(safe-area-inset-top)) 0.9rem 9px;
+                background: rgba(13,13,16,0.92); backdrop-filter: blur(10px);
+                border-bottom: 1px solid #1a1a22;
+            }
+            #btnMenuSidebar {
+                background: rgba(255,255,255,0.05); border: 1px solid #2a2a35; color: #d1d5db;
+                width: 38px; height: 38px; border-radius: 10px; cursor: pointer;
+                display: flex; align-items: center; justify-content: center; font-size: 1rem;
+                flex-shrink: 0;
+            }
+            #topbarTitulo { font-size: 0.9rem; font-weight: 700; color: #fff; margin: 0; min-width: 0;
+                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+            /* Sidebar = drawer off-canvas (arranca bajo la topbar,
+               para que el botón X siga visible y clicable) */
+            #sidebarOverlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 60; }
+            body.sidebar-open #sidebarOverlay { display: block; }
+            body.sidebar-open { overflow: hidden; }
+            #sidebar {
+                top: calc(57px + env(safe-area-inset-top)) !important; bottom: 0 !important;
+                height: auto !important; min-height: 0 !important;
+                width: min(280px, 84vw) !important;
+                transform: translateX(-102%); transition: transform 0.25s ease;
+                z-index: 70 !important; box-shadow: 0 12px 44px rgba(0,0,0,0.65);
+                overflow-y: auto; padding-bottom: env(safe-area-inset-bottom);
+            }
+            body.sidebar-open #sidebar { transform: translateX(0); }
+
+            /* Main sin margen lateral, con espacio para la topbar */
+            main { margin-left: 0 !important; padding-top: calc(57px + env(safe-area-inset-top)) !important; }
+            #dashboard section { padding: 1.25rem 1rem 3rem !important; }
+            #dashboard section h2 { font-size: 1.3rem !important; }
+            #dashboard .card { padding: 1rem !important; }
+
+            /* Botones de acción de las tarjetas: área táctil cómoda */
+            #dashboard .card button { min-height: 36px; }
+            #dashboard .card select { min-height: 36px; }
+
+            /* Modal Plantilla: la columna de vista previa (300px fija)
+               colapsa antes, porque se desborda entre 641-900px */
+            .modal-box [style*="minmax(0,1fr)"] { grid-template-columns: 1fr !important; }
+        }
+
+        @media (max-width: 640px) {
+            /* Rejillas internas de modales y filtros → 1 columna */
+            [style*="grid-template-columns"] { grid-template-columns: 1fr !important; }
+
+            /* Modales: casi pantalla completa */
+            .modal-bg { padding: 0.5rem !important; align-items: flex-end !important; }
+            .modal-box {
+                width: 100% !important; max-width: none !important;
+                max-height: 92dvh !important; overflow-y: auto !important;
+                padding: 1.25rem !important; border-radius: 18px !important;
+            }
+
+            /* iOS/Android hacen zoom automático si el input tiene <16px */
+            input, select, textarea { font-size: 16px !important; }
+            input[type="color"] { min-height: 44px; }
+
+            /* Nada de scroll horizontal: los textos largos cortan */
+            body { overflow-x: hidden; }
+            .card p, .card span, .card h3, .card h4, .card code, .modal-box p, .modal-box code { overflow-wrap: break-word; }
+
+            /* Tarjeta de cita: el select de estado baja a su propia línea */
+            #listaCitas .card > div { flex-wrap: wrap !important; }
+            #listaCitas .card select { width: 100%; margin-top: 10px; }
+
+            /* Toast ancho */
+            #toast { left: 0.9rem !important; right: 0.9rem !important; bottom: calc(env(safe-area-inset-bottom) + 0.9rem) !important; }
+            #toastInner { min-width: 0 !important; max-width: none !important; }
+
+            /* Login y splash aprovechan la pantalla */
+            #loginScreen { min-height: 100dvh !important; padding: 1.25rem 1rem !important; }
+            #splashSesion { min-height: 100dvh !important; }
+            .login-card { padding: 1.5rem 1.25rem !important; }
+        }
+
+        @media (max-width: 480px) {
+            /* Cabecera de sección: título arriba, botón abajo a todo el ancho */
+            #dashboard .sec-head { flex-direction: column; align-items: stretch; }
+            #dashboard .sec-head .btn-gold { justify-content: center; }
+        }
     </style>
 </head>
 <body style="background:#0a0a0b; color:#f0f0f0; min-height:100vh;">
@@ -150,7 +250,7 @@
         </div>
 
         <!-- Card login -->
-        <div style="background:#141414; border:1px solid #262626; border-radius:24px; padding:2rem; box-shadow:0 30px 60px -30px rgba(0,0,0,.8);">
+        <div class="login-card" style="background:#141414; border:1px solid #262626; border-radius:24px; padding:2rem; box-shadow:0 30px 60px -30px rgba(0,0,0,.8);">
             <form id="loginForm">
                 <!-- Correo -->
                 <div style="margin-bottom:1.25rem;">
@@ -206,6 +306,19 @@
      DASHBOARD
 ════════════════════════════════════════════ -->
 <div id="dashboard" style="display:none; height:100vh; flex-direction:row;">
+
+    <!-- ─── TOPBAR MÓVIL (visible solo ≤900px; ver media query) ─── -->
+    <div id="mobileTopbar">
+        <button id="btnMenuSidebar" onclick="toggleSidebar()" aria-label="Abrir menú" aria-expanded="false">
+            <i class="fas fa-bars"></i>
+        </button>
+        <h1 id="topbarTitulo">Panel</h1>
+        <span style="flex:1;"></span>
+        <div style="width:30px; height:28px; border-radius:8px; background:linear-gradient(135deg,var(--brand),var(--brand-2)); display:flex; align-items:center; justify-content:center; flex-shrink:0; overflow:hidden;">
+            <svg aria-hidden="true" style="width:17px; height:16px;"><use href="#sbLogoInk"/></svg>
+        </div>
+    </div>
+    <div id="sidebarOverlay" onclick="cerrarSidebar()" aria-hidden="true"></div>
 
     <!-- ─── SIDEBAR ─── -->
     <aside id="sidebar" style="width:256px; min-height:100vh; background:#0d0d10; border-right:1px solid #1a1a22; display:flex; flex-direction:column; position:fixed; top:0; left:0; bottom:0; z-index:10;">
@@ -288,7 +401,7 @@
         <!-- ══ EMPRESAS ══ -->
         <section id="secEmpresas" class="fade-in" style="padding:2.5rem;">
             <div style="max-width:900px; margin:0 auto;">
-                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:2rem;">
+                <div class="sec-head" style="display:flex; align-items:center; justify-content:space-between; margin-bottom:2rem;">
                     <div>
                         <h2 style="font-size:1.6rem; font-weight:800; color:#fff; margin:0 0 4px;">Empresas</h2>
                         <p style="color:#4b5563; font-size:0.875rem; margin:0;">Configura los datos de tu negocio</p>
@@ -325,7 +438,7 @@
         <!-- ══ NÚMEROS ══ -->
         <section id="secNumeros" class="fade-in" style="display:none; padding:2.5rem;">
             <div style="max-width:900px; margin:0 auto;">
-                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem;">
+                <div class="sec-head" style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem;">
                     <div>
                         <h2 style="font-size:1.6rem; font-weight:800; color:#fff; margin:0 0 4px;">Números de WhatsApp</h2>
                         <p style="color:#4b5563; font-size:0.875rem; margin:0;">Cada número de respuesta pertenece a una empresa</p>
@@ -368,7 +481,7 @@
         <!-- ══ PLANTILLAS ══ -->
         <section id="secPlantillas" class="fade-in" style="display:none; padding:2.5rem;">
             <div style="max-width:900px; margin:0 auto;">
-                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem;">
+                <div class="sec-head" style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem;">
                     <div>
                         <h2 style="font-size:1.6rem; font-weight:800; color:#fff; margin:0 0 4px;">Plantillas de WhatsApp</h2>
                         <p style="color:#4b5563; font-size:0.875rem; margin:0;">Mensajes aprobados por Meta para escribir fuera de la ventana de 24 h</p>
@@ -403,7 +516,7 @@
         <!-- ══ TRABAJADORES ══ -->
         <section id="secTrabajadores" class="fade-in" style="display:none; padding:2.5rem;">
             <div style="max-width:900px; margin:0 auto;">
-                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:2rem;">
+                <div class="sec-head" style="display:flex; align-items:center; justify-content:space-between; margin-bottom:2rem;">
                     <div>
                         <h2 style="font-size:1.6rem; font-weight:800; color:#fff; margin:0 0 4px;">Profesionales</h2>
                         <p style="color:#4b5563; font-size:0.875rem; margin:0;">Cada uno atiende con su propio Google Calendar</p>
@@ -456,7 +569,7 @@
         <!-- ══ SERVICIOS ══ -->
         <section id="secServicios" class="fade-in" style="display:none; padding:2.5rem;">
             <div style="max-width:900px; margin:0 auto;">
-                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:2rem;">
+                <div class="sec-head" style="display:flex; align-items:center; justify-content:space-between; margin-bottom:2rem;">
                     <div>
                         <h2 style="font-size:1.6rem; font-weight:800; color:#fff; margin:0 0 4px;">Servicios</h2>
                         <p style="color:#4b5563; font-size:0.875rem; margin:0;">Configura los servicios de cada empresa</p>
@@ -1021,6 +1134,7 @@ function limpiarSesionLocal() {
 }
 
 function mostrarLogin() {
+    cerrarSidebar();
     document.getElementById('loginScreen').style.display = 'flex';
     document.getElementById('dashboard').style.display = 'none';
 }
@@ -1136,7 +1250,48 @@ async function apiFetch(method, path, body = null) {
 // ─────────────────────────────────────────────
 // NAVIGATION
 // ─────────────────────────────────────────────
+
+/** Título que muestra la topbar móvil según la sección activa. */
+const TITULOS_SECCION = {
+    empresas: 'Empresas', miempresa: 'Mi Empresa', numeros: 'Números',
+    plantillas: 'Plantillas', trabajadores: 'Profesionales',
+    servicios: 'Servicios', citas: 'Citas'
+};
+
+const MQ_MOVIL = window.matchMedia('(max-width: 900px)');
+
+function sidebarAbierto() {
+    return document.body.classList.contains('sidebar-open');
+}
+
+function toggleSidebar() {
+    const abrir = !sidebarAbierto();
+    document.body.classList.toggle('sidebar-open', abrir);
+    const btn = document.getElementById('btnMenuSidebar');
+    if (btn) {
+        btn.setAttribute('aria-expanded', abrir ? 'true' : 'false');
+        btn.innerHTML = abrir ? '<i class="fas fa-times"></i>' : '<i class="fas fa-bars"></i>';
+    }
+}
+
+function cerrarSidebar() {
+    if (!sidebarAbierto()) return;
+    document.body.classList.remove('sidebar-open');
+    const btn = document.getElementById('btnMenuSidebar');
+    if (btn) {
+        btn.setAttribute('aria-expanded', 'false');
+        btn.innerHTML = '<i class="fas fa-bars"></i>';
+    }
+}
+
+// Si se pasa de móvil a escritorio con el drawer abierto, se cierra solo.
+const onMQChange = (e) => { if (!e.matches) cerrarSidebar(); };
+if (MQ_MOVIL.addEventListener) MQ_MOVIL.addEventListener('change', onMQChange);
+else if (MQ_MOVIL.addListener) MQ_MOVIL.addListener(onMQChange); // Safari <14
+
 function showSection(sec) {
+    cerrarSidebar(); // en móvil, elegir sección cierra el drawer
+
     // Nav items
     ['empresas','miempresa','numeros','plantillas','trabajadores','servicios','citas'].forEach(s => {
         const el = document.getElementById(`nav-${s}`);
@@ -1163,6 +1318,10 @@ function showSection(sec) {
         citas: 'secCitas'
     };
     document.getElementById(secMap[sec]).style.display = 'block';
+
+    // Topbar móvil refleja la sección activa
+    const t = document.getElementById('topbarTitulo');
+    if (t) t.textContent = TITULOS_SECCION[sec] || 'Panel';
 
     // Load
     if (sec === 'empresas') cargarEmpresas();
@@ -2800,6 +2959,7 @@ document.querySelectorAll('.modal-bg').forEach(m => {
 // Escape key closes modals
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
+        if (sidebarAbierto()) { cerrarSidebar(); return; }
         ['modalEmpresa','modalNumero','modalPlantilla','modalTrabajador','modalServiciosTrab','modalBloqueo','modalServicio'].forEach(cerrarModal);
     }
 });
