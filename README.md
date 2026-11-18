@@ -1,4 +1,4 @@
-# Bot de citas por WhatsApp
+# SlotBrain (antes BotBarber) — Bot de citas por WhatsApp
 
 Bot de WhatsApp que agenda citas en Google Calendar. Usa la **Meta WhatsApp
 Cloud API** y está pensado para varias empresas y varios profesionales
@@ -65,9 +65,10 @@ cp .env.example .env
 
 **Base nueva:** ejecuta `supabase-schema.sql`.
 
-**Base que ya tiene los datos de la versión anterior:** ejecuta, en este orden,
-`supabase-migracion-v2.sql` y después `supabase-migracion-v3.sql`. Los dos
-archivos son idempotentes y crean copias `_bak_*` antes de tocar nada.
+**Base que ya tiene los datos de la versión anterior:** ejecuta, en este
+orden, `supabase-migracion-v2.sql`, `supabase-migracion-v3.sql` y
+`supabase-migracion-v4-usuarios-admin.sql`. Los archivos son idempotentes y
+las migraciones crean copias `_bak_*` antes de tocar nada.
 
 La v2 hace, entre otras cosas:
 
@@ -81,6 +82,18 @@ La v2 hace, entre otras cosas:
 
 La v3 crea `mensajes_webhook` (para no agendar dos veces el mismo mensaje) y
 agrega la restricción de formato de hora en `citas`.
+
+La v4 crea `usuarios_admin` y `sesiones_admin`: el panel ya no es un solo
+usuario (`ADMIN_USER`/`ADMIN_PASSWORD`), sino logins por correo ligados a
+una empresa (multitenant). En el arranque, si la tabla está vacía y hay
+`ADMIN_USER`/`ADMIN_PASSWORD` en el entorno, se crea el superadmin inicial
+con esas credenciales. Más usuarios:
+
+```bash
+npm run crear-usuario -- activos@barberia.com Contraseña123 --propietario "Mi Barbería"
+npm run crear-usuario -- staff@barberia.com Contraseña123 --staff "Mi Barbería"
+npm run crear-usuario -- yo@lolcal.com Contraseña123 --superadmin
+```
 
 ## Variables de entorno
 
@@ -98,7 +111,7 @@ Copia `.env.example` y llénalo. Lo importante:
 | `SECRETO_ENLACE` | Firma los enlaces de vinculación de Calendar |
 | `SUPABASE_URL` / `SUPABASE_KEY` | Base de datos |
 | `GROQ_API_KEY` | Modelo de lenguaje |
-| `ADMIN_USER` / `ADMIN_PASSWORD` | Acceso al panel |
+| `ADMIN_USER` / `ADMIN_PASSWORD` | Solo bootstrap: crean el superadmin inicial si la tabla `usuarios_admin` está vacía |
 
 **Los tokens de Meta viven solo en variables de entorno**, nunca en la base de
 datos. La tabla `numeros_bot` guarda qué número es de quién y su
@@ -173,8 +186,11 @@ Europa con el horario de verano mal puesto.
   Google, nunca desde el panel.
 - Se compara la firma del webhook con `timingSafeEqual`, y se compara el token
   del panel de la misma forma.
-- El panel devuelve 503 si no hay `ADMIN_USER`/`ADMIN_PASSWORD`, en vez de
-  caer a unas credenciales por defecto.
+- El panel SIEMPRE pide credenciales contra la tabla `usuarios_admin`
+  (migración v4): los usuarios pertenecen a una empresa y toda la API del
+  panel queda filtrada por esa empresa, salvo para el rol 'superadmin'
+  (que no pertenece a ninguna). `ADMIN_USER/ADMIN_PASSWORD` solo se usan
+  una vez, para crear el superadmin inicial si la tabla está vacía.
 
 ## Estructura
 
@@ -190,7 +206,9 @@ Europa con el horario de verano mal puesto.
 | `googleAuth.js` | Cliente OAuth2 reutilizable |
 | `tiempo.js` | Zonas horarias y formato de fechas |
 | `conversaciones.js` | Estado conversacional en Supabase |
-| `admin.js` | API del panel, con listas blancas |
+| `admin.js` | API del panel, con listas blancas y scoping multi-tenant |
+| `scripts/crear-usuario.js` | Crear usuarios del panel (`npm run crear-usuario`) |
+| `docs/` | CODEBASE.md, CALENDARIO-GRATIS.md, ROADMAP-MULTITENANT.md |
 | `botState.js` | Estado mínimo de la sesión |
 
 ## Cosas que cambiaron respecto a la versión 1

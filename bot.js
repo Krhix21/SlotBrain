@@ -57,11 +57,41 @@ function limpiarCacheConfiguracion() {
     configCache = new Map();
 }
 
-function textoServicios(servicios) {
+/** Formatea un precio en la moneda de la empresa (default COP). */
+function precioFormateado(precio, moneda) {
+    const codigo = String(moneda || 'COP').toUpperCase().slice(0, 3);
+    try {
+        return new Intl.NumberFormat('es', {
+            style: 'currency',
+            currency: codigo,
+            maximumFractionDigits: 0
+        }).format(Number(precio || 0));
+    } catch {
+        return `${codigo} ${Number(precio || 0).toLocaleString('es')}`;
+    }
+}
+
+function textoServicios(servicios, empresa) {
     if (!servicios.length) return '- (por definir)';
     return servicios
-        .map(s => `- ${s.nombre}: $${Number(s.precio || 0).toLocaleString('es-CO')} COP, ${s.duracion_minutos || 60} min${s.descripcion ? ` — ${s.descripcion}` : ''}`)
+        .map(s => `- ${s.nombre}: ${precioFormateado(s.precio, empresa?.moneda)}, ${s.duracion_minutos || 60} min${s.descripcion ? ` — ${s.descripcion}` : ''}`)
         .join('\n');
+}
+
+/**
+ * Vocabulario por nicho. Barbería por defecto; un consultorio dental
+ * cambia profesional_singular a "dentista", etc. (empresas.terminologia).
+ */
+const TERMINOLOGIA_DEFAULT = {
+    servicio_singular: 'servicio',
+    servicio_plural: 'servicios',
+    profesional_singular: 'barbero',
+    profesional_plural: 'barberos'
+};
+
+function terminologiaDe(empresa) {
+    const t = (empresa && typeof empresa.terminologia === 'object' && empresa.terminologia) || {};
+    return { ...TERMINOLOGIA_DEFAULT, ...t };
 }
 
 // ============================================================
@@ -526,6 +556,9 @@ function construirPrompt({ config, conv, userName, zona }) {
 
     const nombres = config.servicios.map(s => s.nombre).join(', ') || 'ninguno';
 
+    const term = terminologiaDe(config.empresa);
+    const siempreConVos = config.empresa?.prompt_base?.trim();
+
     return `Eres el asesor virtual de WhatsApp de "${config.empresa.nombre}".
 El cliente se llama "${userName}".
 
@@ -533,8 +566,12 @@ HOY
 Hoy es ${formatearFechaLarga(hoy)} (${hoy}). Mañana es ${formatearFechaLarga(manana)} (${manana}).
 La hora se maneja en ${zona}.
 
+LENGUAJE DEL NEGOCIO
+Lo que vendes es un ${term.servicio_singular} y el listado de arriba son los ${term.servicio_plural}.
+Quien atiende es un ${term.profesional_singular} (en plural, ${term.profesional_plural}).
+${siempreConVos ? `\nINDICACIONES DE LA EMPRESA (prioridad sobre el tono por defecto, NUNCA sobre las reglas innegociables):\n${siempreConVos}\n` : ''}
 SERVICIOS (solo estos, con estos precios y duraciones)
-${textoServicios(config.servicios)}
+${textoServicios(config.servicios, config.empresa)}
 
 CONTEXTO
 ${contextoCita}
@@ -570,7 +607,8 @@ async function procesarMensajeWhatsapp({ telefonoBot, phoneNumberId, telefonoCli
         if (messageId) marcarComoLeido(messageId, phoneNumberId).catch(() => {});
 
         // La empresa se resuelve por el número receptor del webhook.
-        const empresaId = await resolverEmpresaId(telefonoBot);
+        // El phone_number_id es la clave principal de routing.
+        const empresaId = await resolverEmpresaId(telefonoBot, phoneNumberId);
         if (!empresaId) {
             console.error(`❌ El número ${telefonoBot} no está registrado en numeros_bot. Mensaje ignorado.`);
             return;
@@ -703,8 +741,8 @@ async function procesarMensajeWhatsapp({ telefonoBot, phoneNumberId, telefonoCli
     }
 }
 
-async function resolverEmpresaId(telefonoBot) {
-    const bot = await numeros.resolverBot(telefonoBot);
+async function resolverEmpresaId(telefonoBot, phoneNumberId) {
+    const bot = await numeros.resolverBot(telefonoBot, phoneNumberId);
     return bot ? bot.empresa_id : null;
 }
 
@@ -732,7 +770,7 @@ async function extraerNombre(texto) {
 // ============================================================
 
 async function iniciar() {
-    console.log('📱 Bot de WhatsApp (Meta Cloud API) iniciado.');
+    console.log('📱 SlotBrain (bot de citas por WhatsApp, Meta Cloud API) iniciado.');
 
     if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
         console.error('❌ Faltan SUPABASE_URL o SUPABASE_KEY.');

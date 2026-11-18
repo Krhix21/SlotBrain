@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Política de Privacidad · SlotBrain</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="alternate icon" type="image/png" href="/favicon-64.png">
+  <link rel="apple-touch-icon" href="/favicon-64.png">
+<style>
+:root{--bg:#0a0a0a;--sf:#141414;--tx:#f5f5f4;--mu:#a1a1aa;--bd:#262626;--a1:#f59e0b}
+@media (prefers-color-scheme:light){:root{--bg:#fffaf0;--sf:#fff;--tx:#1c1917;--mu:#6b6559;--bd:#eadfc6}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.w{max-width:780px;margin:0 auto;padding:0 22px}
+header{border-bottom:1px solid var(--bd);background:var(--sf)}
+header .w{display:flex;align-items:center;justify-content:space-between;height:64px}
+.lg{font-size:20px;font-weight:700;letter-spacing:-.5px;color:var(--tx);text-decoration:none}
+.lg b{color:var(--a1)}
+h1{font-size:34px;letter-spacing:-1px;margin:40px 0 6px}
+.date{color:var(--mu);font-size:14px;margin-bottom:30px}
+h2{font-size:20px;margin:34px 0 8px;color:var(--a1)}
+p,li{color:var(--tx)}
+ul{padding-left:22px}
+a{color:var(--a1)}
+.card{background:var(--sf);border:1px solid var(--bd);border-radius:14px;padding:18px 22px;margin:28px 0}
+footer{border-top:1px solid var(--bd);margin-top:56px;padding:26px 0;color:var(--mu);font-size:14px}
+</style>
+</head>
+<body>
+<header><div class="w"><a class="lg" href="/">slot<b>brain</b></a><a class="lg" href="/" style="font-size:14px;font-weight:500;color:var(--mu)">← Volver al inicio</a></div></header>
+<main class="w">
+<h1>Política de Privacidad</h1>
+<p class="date">Última actualización: 14 de noviembre de 2026</p>
+
+<p>SlotBrain ("nosotros") es un asistente de agendamiento de citas por WhatsApp para negocios y profesionales. Esta política explica qué datos tratamos, por qué, y cómo puedes ejercer tus derechos. Al usar SlotBrain aceptas las prácticas descritas aquí.</p>
+
+<h2>1. Datos que tratamos</h2>
+<ul>
+<li><b>Datos de clientes finales</b> que escriben al WhatsApp del negocio: nombre aportado en la conversación, número de teléfono (WhatsApp) y detalles de la cita (servicio, fecha, hora, profesional).</li>
+<li><b>Datos del negocio y su equipo</b> registrados en el panel: nombre del negocio, servicios y precios, horarios, nombres de los profesionales y sus números de contacto.</li>
+<li><b>Datos de la cuenta de Google conectada</b> (ver sección 4): token de acceso y token de actualización cifrados, la dirección de correo de la cuenta vinculada y el identificador del calendario usado para las citas.</li>
+<li><b>Datos técnicos de operación</b>: registros de estado del bot e identificadores de mensajes de WhatsApp necesarios para no duplicar o perder conversaciones.</li>
+</ul>
+<p>No solicitamos ni tratamos datos sensibles como contraseñas, datos biométricos, información financiera o de salud de los clientes finales.</p>
+
+<h2>2. Finalidad del tratamiento</h2>
+<ul>
+<li>Responder conversaciones de agendamiento y confirmar citas en nombre del negocio.</li>
+<li>Consultar la disponibilidad del profesional y escribir/cancelar los eventos de cita en su calendario.</li>
+<li>Enviar notificaciones de citas al negocio o al profesional a través de WhatsApp.</li>
+<li>Mantener el funcionamiento, la seguridad y el soporte del servicio.</li>
+</ul>
+<p>No usamos tus datos para publicidad, no los vendemos, y no los empleamos para entrenar modelos de inteligencia artificial.</p>
+
+<h2>3. Herramientas y proveedores</h2>
+<ul>
+<li><b>WhatsApp (Meta Cloud API):</b> medio de conversación con los clientes finales. Aplica la política de datos de Meta.</li>
+<li><b>Supabase (base de datos):</b> almacenamiento de agendas, conversaciones activas y configuraciones, en servidores de la nube.</li>
+<li><b>Render (hosting):</b> ejecución de la aplicación.</li>
+<li><b>Groq (procesamiento de lenguaje):</b> interpreta el texto del cliente para generar respuestas. El contenido se transmite para este fin y no se almacena en SlotBrain más allá de la conversación de la cita.</li>
+<li><b>Google (Calendar API / OAuth):</b> disponibilidad y eventos del calendario del profesional.</li>
+</ul>
+
+<h2>4. Uso de la API de Google Calendar</h2>
+<p>Cuando un profesional vincula su cuenta de Google mediante OAuth 2.0, SlotBrain accede exclusivamente a su calendario para:</p>
+<ul>
+<li>Consultar horarios ocupados/libres del profesional (freebusy).</li>
+<li>Crear, leer, actualizar y eliminar eventos relacionados con las citas gestionadas por el servicio.</li>
+</ul>
+<p>No accedemos a otros productos de Google (Gmail, Drive, fotos, contactos). El vínculo puede revocarse en cualquier momento desde <i>myaccount.google.com/permissions</i> o desde el panel de SlotBrain; al revocarlo, el calendario deja de sincronizarse de inmediato. Los tokens se guardan cifrados y solo se usan con las finalidades de esta sección.</p>
+
+<h2>5. Conservación</h2>
+<p>Las conversaciones y citas se conservan mientras la cuenta del negocio esté activa. Puedes eliminar profesionales, clientes o la empresa completa desde el panel, y los datos asociados se eliminan de la base de datos. Si dejas de usar el servicio, eliminamos los datos en un plazo razonable, salvo obligaciones legales.</p>
+
+<h2>6. Seguridad</h2>
+<p>Aplicamos cifrado de tokens, comunicaciones por HTTPS, acceso al panel con autenticación y secretos de configuración que nunca se exponen a los usuarios. Ningún sistema es infalible; si ocurre un incidente de seguridad que afecte tus datos, te lo comunicaremos por un medio de contacto disponible.</p>
+
+<h2>7. Compartir datos</h2>
+<p>No compartimos datos personales con terceros, excepto: (a) los proveedores listados en la sección 3, necesarios para operar; (b) el propio negocio, que es titular de la relación con sus clientes; y (c) requerimiento de autoridad competente.</p>
+
+<h2>8. Tus derechos</h2>
+<p>Como titular de datos (cliente final o profesional) puedes solicitar acceso, rectificación, actualización y supresión de tus datos, así como revocar la autorización y solicitar el cese del tratamiento, conforme a la Ley 1581 de 2012 y demás normas colombianas de protección de datos personales. Envía tu solicitud al correo indicado abajo y la responderemos en los plazos legales.</p>
+
+<div class="card">
+<h2 style="margin-top:0">9. Contacto</h2>
+<p>Responsable del tratamiento: SlotBrain.<br>
+Correo para privacidad y solicitudes de derechos: <a href="mailto:krhixfer07@gmail.com">krhixfer07@gmail.com</a></p>
+</div>
+
+<h2>10. Cambios a esta política</h2>
+<p>Si la actualizamos, publicaremos la nueva versión en esta página con su fecha. Cambios materiales se anunciarán a los negocios registrados.</p>
+</main>
+<footer><div class="w">© 2026 SlotBrain · <a href="/privacidad">Política de Privacidad</a> · <a href="/terminos">Términos de Servicio</a></div></footer>
+</body>
+</html>

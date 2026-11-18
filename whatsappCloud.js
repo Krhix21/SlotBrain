@@ -10,14 +10,29 @@
 //   META_TOKENS_JSON     -> { "<phone_number_id>": "<token>", ... }
 //   META_PHONE_NUMBER_ID -> phone_number_id principal (respaldo)
 //
+// MULTI-TENANT (Fase 3A): si un phone_number_id no está en el env,
+// se busca su token CIFRADO en `numeros_bot.meta_token_cifrado`
+// (ver tokensMeta.js). Con caché en memoria de 5 minutos; para
+// invalidarla, tokensMeta.limpiarCache() tras editar un número.
+//
 // Requiere Node 18+ (usa el fetch global).
 // ============================================================
 
+const { createClient } = require('@supabase/supabase-js');
+const tokensMeta = require('./tokensMeta');
+const { explicarErrorMeta } = require('./erroresMeta');
+
 const GRAPH_API_VERSION = 'v24.0';
+
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 let tokensPorNumero = null;
 
-// Lee META_TOKENS_JSON una sola vez y lo cachea.
+// Tokens descifrados desde la base, con TTL corto: si rotan el token
+// en el panel, la caché no los regresa eternamente.
+const CACHE_TOKENS_MS = 5 * 60 * 1000;
+let cacheTokensDb = new Map();
+
 function mapaDeTokens() {
     if (tokensPorNumero) return tokensPorNumero;
 
@@ -40,19 +55,52 @@ function mapaDeTokens() {
     return tokensPorNumero;
 }
 
-/**
- * Resuelve el phone_number_id y el token de un envío.
- * @param {string} phoneNumberId - Phone Number ID destino. Si se omite, usa META_PHONE_NUMBER_ID.
- */
-function credenciales(phoneNumberId) {
-    const id = phoneNumberId || process.env.META_PHONE_NUMBER_ID;
-    const token = mapaDeTokens()[id] || process.env.META_WHATSAPP_TOKEN;
+/** Token de la base (descifrado) para un phone_number_id. */
+async function tokenDeBase(phoneNumberId) {
+    const cached = cacheTokensDb.get(phoneNumberId);
+    if (cached && cached.expiraAt > Date.now()) return cached.token;
 
-    if (!id || !token) {
+    const { data, error } = await supabase
+        .from('numeros_bot')
+        .select('meta_token_cifrado')
+        .eq('phone_number_id', phoneNumberId)
+        .eq('activo', true)
+        .maybeSingle();
+
+    if (error || !data?.meta_token_cifrado) return null;
+
+    const token = tokensMeta.descifrar(data.meta_token_cifrado);
+    if (!token) {
+        console.error('❌ No se pudo descifrar el token de WhatsApp (¿cambió APP_ENCRYPTION_KEY?). Vuelve a conectar el número en el panel.');
+        // No cachear el fallo: se reintentará, pero sin token responde null.
+        return null;
+    }
+
+    cacheTokensDb.set(phoneNumberId, { token, expiraAt: Date.now() + CACHE_TOKENS_MS });
+    return token;
+}
+
+/** Invalida la caché de tokens de la base. Llamar tras editar/crear un número. */
+function limpiarCacheTokens(phoneNumberId) {
+    if (phoneNumberId) cacheTokensDb.delete(phoneNumberId);
+    else cacheTokensDb = new Map();
+}
+
+async function credenciales(phoneNumberId) {
+    const id = phoneNumberId || process.env.META_PHONE_NUMBER_ID;
+
+    if (!id) {
+        console.error('⚠️  Falta MATA_PHONE_NUMBER_ID y no se indicó el phone_number_id del envío.');
+        return null;
+    }
+
+    let token = mapaDeTokens()[id];
+    if (!token) token = await tokenDeBase(id);
+
+    if (!token) {
         console.error(
-            '⚠️  Faltan credenciales de Meta. ' +
-            (id ? `No hay token para el phone_number_id ${id}.` : 'Falta META_PHONE_NUMBER_ID.') +
-            ' Revisa META_TOKENS_JSON o META_WHATSAPP_TOKEN.'
+            '⚠️  No hay token de Meta para el phone_number_id ' + id + '. ' +
+            'Regístralo en META_TOKENS_JSON o conecta el número desde el panel.'
         );
         return null;
     }
@@ -73,13 +121,31 @@ function cabeceras(token) {
 
 /**
  * Envía un mensaje de texto simple.
+ *
+ * Contrato normal: SOLO devuelve el payload cuando el mensaje se
+ * admitió (HTTP 2xx). Cualquier error de Meta queda logueado legible
+ * (con el JSON crudo de Meta para el rastro) y devuelve null: así el
+ * llamador (bot/recordatorios) no confunde "enviado" con "rechazado",
+ * que antes marcaba recordatorios como enviados cuando Meta rechazó.
+ *
  * @param {string} numeroDestino - Número internacional SIN "+" (ej. "573001234567")
  * @param {string} texto - Contenido del mensaje
  * @param {string} phoneNumberId - A qué número se responde. Opcional si hay uno solo.
+ * @param {{diagnostico?:boolean}} [opciones]
+ * @returns {Promise<object|null|{enviado:boolean, error:{tipo,motivo}|null}>}
+ *          con {diagnostico:true} devuelve {enviado, error|null} con el
+ *          error explicado (para registrar el motivo del intento fallido).
  */
-async function enviarMensajeTexto(numeroDestino, texto, phoneNumberId) {
-    const cred = credenciales(phoneNumberId);
-    if (!cred) return null;
+async function enviarMensajeTexto(numeroDestino, texto, phoneNumberId, opciones = {}) {
+    const cred = await credenciales(phoneNumberId);
+    const finalizar = (enviado, payload, errorExplicado) => {
+        if (opciones.diagnostico) return { enviado, error: errorExplicado || null };
+        return enviado ? payload : null;
+    };
+
+    if (!cred) {
+        return finalizar(false, null, null);
+    }
 
     try {
         const response = await fetch(urlMensajes(cred.phoneNumberId), {
@@ -93,22 +159,19 @@ async function enviarMensajeTexto(numeroDestino, texto, phoneNumberId) {
             })
         });
 
-        const data = await response.json();
-
         if (!response.ok) {
-            console.error('❌ Error enviando mensaje vía Cloud API:', JSON.stringify(data));
-
-            // 131049 = la ventana de 24 h con ese cliente está cerrada:
-            // solo se puede responder si él nos escribió primero hoy.
-            if (data?.error?.code === 131049) {
-                console.warn('⚠️  La ventana de 24h con este cliente está cerrada. El mensaje no salió.');
-            }
+            const data = await response.json().catch(() => ({}));
+            const { tipo, motivo, crudo } = explicarErrorMeta(data);
+            console.error(`❌ Envío a ${numeroDestino} RECHAZADO por Meta [${tipo}]`);
+            console.error(`   ${motivo}`);
+            console.error(`   crudo: ${crudo}`);
+            return finalizar(false, null, { tipo, motivo });
         }
 
-        return data;
+        return finalizar(true, response.json());
     } catch (error) {
         console.error('❌ Error de red enviando mensaje vía Cloud API:', error);
-        return null;
+        return finalizar(false, null, null);
     }
 }
 
@@ -120,7 +183,7 @@ async function enviarMensajeTexto(numeroDestino, texto, phoneNumberId) {
 async function marcarComoLeido(messageId, phoneNumberId) {
     if (!messageId) return null;
 
-    const cred = credenciales(phoneNumberId);
+    const cred = await credenciales(phoneNumberId);
     if (!cred) return null;
 
     try {
@@ -159,4 +222,4 @@ function normalizarTelefono(telefono) {
     return digitos || null;
 }
 
-module.exports = { enviarMensajeTexto, marcarComoLeido, normalizarTelefono };
+module.exports = { enviarMensajeTexto, marcarComoLeido, normalizarTelefono, limpiarCacheTokens };
