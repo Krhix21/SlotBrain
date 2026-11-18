@@ -111,6 +111,64 @@ async function requireAuth(req, res, next) {
     next();
 }
 
+// ============================================================
+// Límite de intentos del login (anti fuerza bruta)
+//
+// Contador en memoria por IP: 5 intentos fallidos en 15 minutos
+// bloquean nuevos intentos durante 15 minutos. Funciona porque el
+// panel corre en un solo proceso (Render); si algún día hubiera
+// varias instancias, esto se mueve a la base de datos.
+// ============================================================
+const LOGIN_VENTANA_MS = 15 * 60 * 1000;
+const LOGIN_MAX_FALLOS = 5;
+const LOGIN_BLOQUEO_MS = 15 * 60 * 1000;
+const intentosLogin = new Map(); // ip -> { fallos: [ts], bloqueadoHasta: ts }
+
+function ipDePeticion(req) {
+    // Detrás del proxy de Render la IP real viaja en x-forwarded-for.
+    const fwd = req.headers['x-forwarded-for'];
+    if (typeof fwd === 'string' && fwd.trim()) {
+        return fwd.split(',')[0].trim();
+    }
+    return req.socket?.remoteAddress || 'desconocida';
+}
+
+/** Segundos restantes de bloqueo para esa IP (0 si no está bloqueada). */
+function loginBloqueado(ip, ahora = Date.now()) {
+    const registro = intentosLogin.get(ip);
+    if (!registro) return 0;
+    if (registro.bloqueadoHasta && registro.bloqueadoHasta > ahora) {
+        return Math.ceil((registro.bloqueadoHasta - ahora) / 1000);
+    }
+    return 0;
+}
+
+function registrarFalloLogin(ip, ahora = Date.now()) {
+    const registro = intentosLogin.get(ip) || { fallos: [], bloqueadoHasta: 0 };
+    registro.fallos = [...(registro.fallos || []), ahora]
+        .filter(ts => ahora - ts < LOGIN_VENTANA_MS);
+    if (registro.fallos.length >= LOGIN_MAX_FALLOS) {
+        registro.bloqueadoHasta = ahora + LOGIN_BLOQUEO_MS;
+        registro.fallos = [];
+        console.warn(`🚫 IP ${ip} bloqueada ${Math.round(LOGIN_BLOQUEO_MS / 60000)} min por intentos de login fallidos.`);
+    }
+    intentosLogin.set(ip, registro);
+}
+
+function limpiarFallosLogin(ip) {
+    intentosLogin.delete(ip);
+}
+
+// Limpieza periódica para que el Map no crezca sin límite.
+setInterval(() => {
+    const ahora = Date.now();
+    for (const [ip, registro] of intentosLogin) {
+        const vivo = (registro.bloqueadoHasta && registro.bloqueadoHasta > ahora)
+            || (registro.fallos || []).some(ts => ahora - ts < LOGIN_VENTANA_MS);
+        if (!vivo) intentosLogin.delete(ip);
+    }
+}, 30 * 60 * 1000).unref();
+
 async function login(req, res) {
     const body = req.body || {};
     const password = typeof body.password === 'string' ? body.password : '';
@@ -123,6 +181,15 @@ async function login(req, res) {
     const email = normalizarCorreoAdmin(body.email || body.usuario);
     if (!body.email && !body.usuario) {
         return res.status(400).json({ error: 'Envía tu correo y contraseña' });
+    }
+
+    const ip = ipDePeticion(req);
+    const bloqueoRestante = loginBloqueado(ip);
+    if (bloqueoRestante > 0) {
+        console.warn(`🚫 Login rechazado a IP bloqueada ${ip} (correo: ${email}).`);
+        return res.status(429).json({
+            error: `Demasiados intentos fallidos. Espera ${Math.ceil(bloqueoRestante / 60)} minutos y prueba de nuevo.`
+        });
     }
 
     const { data: usuario, error } = await supabase
@@ -141,9 +208,11 @@ async function login(req, res) {
 
     if (!credencialesOk) {
         console.warn(`⚠️  Intento de login fallido para "${email}".`);
+        registrarFalloLogin(ip);
         return res.status(401).json({ error: 'Credenciales incorrectas' });
     }
 
+    limpiarFallosLogin(ip);
     const token = generarToken();
     const expira = new Date(Date.now() + SESSION_TTL).toISOString();
 

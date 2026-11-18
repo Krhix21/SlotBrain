@@ -118,9 +118,21 @@
 </defs></svg>
 
 <!-- ═══════════════════════════════════════════
+     SPLASH: pantalla neutra mientras se valida una sesión guardada.
+     Evita el "flash" del login cuando el token de localStorage
+     todavía es válido y la petición a /api/admin/validate viaja.
+════════════════════════════════════════════ -->
+<div id="splashSesion" class="login-bg" style="display:none; min-height:100vh; align-items:center; justify-content:center; flex-direction:column; gap:1rem;">
+    <div style="font-size:1.6rem; font-weight:700; letter-spacing:-0.02em;">slot<span style="color:var(--brand,#d97706);">brain</span></div>
+    <div style="display:flex; align-items:center; gap:0.6rem; color:#8b8b95; font-size:0.8rem;">
+        <i class="fas fa-circle-notch fa-spin"></i> Verificando tu sesión…
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
      LOGIN SCREEN
 ════════════════════════════════════════════ -->
-<div id="loginScreen" class="login-bg" style="display:flex; min-height:100vh; align-items:center; justify-content:center; padding:1rem; position:relative; overflow:hidden;">
+<div id="loginScreen" class="login-bg" style="display:none; min-height:100vh; align-items:center; justify-content:center; padding:1rem; position:relative; overflow:hidden;">
     <div aria-hidden="true" style="position:absolute; border-radius:50%; filter:blur(90px); opacity:.3; pointer-events:none; width:420px; height:420px; background:#d97706; top:-120px; left:-100px;"></div>
     <div aria-hidden="true" style="position:absolute; border-radius:50%; filter:blur(90px); opacity:.28; pointer-events:none; width:340px; height:340px; background:#f59e0b; bottom:-100px; right:-90px;"></div>
 
@@ -974,10 +986,21 @@ let toastTimer = null;
 // INIT
 // ─────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
-    if (token) {
-        const ok = await checkToken();
-        if (ok) { mostrarDashboard(); return; }
-    }
+    if (!token) { mostrarLogin(); return; }
+
+    // Hay token guardado: pantalla neutra mientras se valida contra el
+    // servidor. Antes se mostraba el login y saltaba al dashboard, lo que
+    // daba ese "parpadeo" al volver a abrir la pestaña.
+    const splash = document.getElementById('splashSesion');
+    if (splash) splash.style.display = 'flex';
+
+    const ok = await checkToken();
+
+    if (splash) splash.style.display = 'none';
+    if (ok) { mostrarDashboard(); return; }
+
+    // Sesión vencida o inválida: fuera también los datos de la barra lateral.
+    limpiarSesionLocal();
     mostrarLogin();
 });
 
@@ -986,6 +1009,15 @@ async function checkToken() {
         const res = await apiFetch('GET', '/api/admin/validate');
         return res.ok;
     } catch { return false; }
+}
+
+/** Borra el token y los datos de sesión guardados en el navegador. */
+function limpiarSesionLocal() {
+    token = null;
+    localStorage.removeItem('adminToken');
+    localStorage.removeItem('adminUser');
+    localStorage.removeItem('adminRol');
+    localStorage.removeItem('adminEmpresaId');
 }
 
 function mostrarLogin() {
@@ -1075,11 +1107,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
 
 async function doLogout() {
     try { await apiFetch('POST', '/api/admin/logout'); } catch {}
-    token = null;
-    localStorage.removeItem('adminToken');
-    localStorage.removeItem('adminUser');
-    localStorage.removeItem('adminRol');
-    localStorage.removeItem('adminEmpresaId');
+    limpiarSesionLocal();
     document.getElementById('loginAviso').style.display = 'none';
     mostrarLogin();
 }
@@ -1098,8 +1126,7 @@ async function apiFetch(method, path, body = null) {
     if (body) opts.body = JSON.stringify(body);
     const res = await fetch(path, opts);
     if (res.status === 401) {
-        token = null;
-        localStorage.removeItem('adminToken');
+        limpiarSesionLocal();
         mostrarLogin();
         throw new Error('unauthorized');
     }
@@ -1237,8 +1264,8 @@ function renderEmpresas() {
         <div class="card fade-in" style="margin-bottom:1rem; padding:1.5rem;">
             <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:1rem;">
                 <div style="display:flex; align-items:center; gap:1rem; flex:1; min-width:0;">
-                    <div style="width:48px; height:48px; border-radius:12px; background:${emp.color_primario ? emp.color_primario + '1a' : 'rgba(245,158,11,0.1)'}; border:1px solid ${emp.color_primario ? emp.color_primario + '40' : 'rgba(245,158,11,0.25)'}; display:flex; align-items:center; justify-content:center; flex-shrink:0; overflow:hidden;">
-                        ${emp.logo_url ? `<img src="${escHtml(emp.logo_url)}" alt="" style="width:100%; height:100%; object-fit:cover;">` : `<i class="fas fa-store" style="color:${emp.color_primario || '#f59e0b'};"></i>`}
+                    <div style="width:48px; height:48px; border-radius:12px; background:${emp.color_primario ? cssColor(emp.color_primario, '#f59e0b') + '1a' : 'rgba(245,158,11,0.1)'}; border:1px solid ${emp.color_primario ? cssColor(emp.color_primario, '#f59e0b') + '40' : 'rgba(245,158,11,0.25)'}; display:flex; align-items:center; justify-content:center; flex-shrink:0; overflow:hidden;">
+                        ${emp.logo_url ? `<img src="${escHtml(emp.logo_url)}" alt="" style="width:100%; height:100%; object-fit:cover;">` : `<i class="fas fa-store" style="color:${cssColor(emp.color_primario, '#f59e0b')};"></i>`}
                     </div>
                     <div style="min-width:0;">
                         <h3 style="font-size:1rem; font-weight:700; color:#fff; margin:0 0 3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escHtml(emp.nombre)}</h3>
@@ -1645,14 +1672,14 @@ function renderTrabajadores() {
             </div>
 
             <div style="margin-top:1rem; display:flex; flex-wrap:wrap; gap:0.5rem; justify-content:flex-end;">
-                <button onclick="abrirModalServiciosTrab('${t.id}', '${escHtml(t.nombre || 'Profesional')}')" style="background:rgba(255,255,255,0.04); border:1px solid #2a2a35; color:#9ca3af; padding:6px 12px; border-radius:8px; cursor:pointer; font-size:0.74rem;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#9ca3af'">
+                <button onclick="abrirModalServiciosTrab('${t.id}', '${escJs(t.nombre || 'Profesional')}')" style="background:rgba(255,255,255,0.04); border:1px solid #2a2a35; color:#9ca3af; padding:6px 12px; border-radius:8px; cursor:pointer; font-size:0.74rem;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#9ca3af'">
                     <i class="fas fa-list-check" style="margin-right:5px;"></i>Servicios
                 </button>
-                <button onclick="abrirModalBloqueo('${t.id}', '${escHtml(t.nombre || 'Profesional')}')" style="background:rgba(255,255,255,0.04); border:1px solid #2a2a35; color:#9ca3af; padding:6px 12px; border-radius:8px; cursor:pointer; font-size:0.74rem;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#9ca3af'">
+                <button onclick="abrirModalBloqueo('${t.id}', '${escJs(t.nombre || 'Profesional')}')" style="background:rgba(255,255,255,0.04); border:1px solid #2a2a35; color:#9ca3af; padding:6px 12px; border-radius:8px; cursor:pointer; font-size:0.74rem;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#9ca3af'">
                     <i class="fas fa-calendar-xmark" style="margin-right:5px;"></i>Ausencia
                 </button>
                 ${calConectado ? `
-                <button onclick="desconectarCalendar('${t.id}', '${escHtml(t.nombre || 'este profesional')}')" style="background:rgba(239,68,68,0.07); border:1px solid rgba(239,68,68,0.2); color:#f87171; padding:6px 12px; border-radius:8px; cursor:pointer; font-size:0.74rem;" onmouseover="this.style.background='rgba(239,68,68,0.15)'" onmouseout="this.style.background='rgba(239,68,68,0.07)'">
+                <button onclick="desconectarCalendar('${t.id}', '${escJs(t.nombre || 'este profesional')}')" style="background:rgba(239,68,68,0.07); border:1px solid rgba(239,68,68,0.2); color:#f87171; padding:6px 12px; border-radius:8px; cursor:pointer; font-size:0.74rem;" onmouseover="this.style.background='rgba(239,68,68,0.15)'" onmouseout="this.style.background='rgba(239,68,68,0.07)'">
                     <i class="fas fa-unlink" style="margin-right:5px;"></i>Desconectar
                 </button>` : `
                 <button onclick="copiarEnlaceCalendar('${t.id}')" style="background:var(--brand-soft); border:1px solid var(--brand-line); color:var(--brand); padding:6px 12px; border-radius:8px; cursor:pointer; font-size:0.74rem; font-weight:600;" onmouseover="this.style.background='var(--brand-glow)'" onmouseout="this.style.background='var(--brand-soft)'">
@@ -2139,7 +2166,7 @@ function renderNumeros() {
                 <button onclick="toggleNumero('${n.id}', ${!n.activo})" title="${n.activo ? 'Desactivar' : 'Activar'}" style="background:rgba(255,255,255,0.04); border:1px solid #2a2a35; color:#9ca3af; padding:6px 10px; border-radius:8px; cursor:pointer; font-size:0.78rem;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#9ca3af'">
                     <i class="fas fa-power-off"></i>
                 </button>
-                <button onclick="eliminarNumero('${n.id}', '${escHtml(n.telefono)}')" title="Eliminar" style="background:rgba(239,68,68,0.07); border:1px solid rgba(239,68,68,0.2); color:#f87171; padding:6px 10px; border-radius:8px; cursor:pointer; font-size:0.78rem;" onmouseover="this.style.background='rgba(239,68,68,0.15)'" onmouseout="this.style.background='rgba(239,68,68,0.07)'">
+                <button onclick="eliminarNumero('${n.id}', '${escJs(n.telefono)}')" title="Eliminar" style="background:rgba(239,68,68,0.07); border:1px solid rgba(239,68,68,0.2); color:#f87171; padding:6px 10px; border-radius:8px; cursor:pointer; font-size:0.78rem;" onmouseover="this.style.background='rgba(239,68,68,0.15)'" onmouseout="this.style.background='rgba(239,68,68,0.07)'">
                     <i class="fas fa-trash"></i>
                 </button>
             </div>
@@ -2408,7 +2435,7 @@ function renderPlantillas() {
                     <button onclick="editarPlantilla('${p.id}')" title="Editar" style="background:rgba(255,255,255,0.04); border:1px solid #2a2a35; color:#9ca3af; padding:6px 10px; border-radius:8px; cursor:pointer; font-size:0.78rem;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#9ca3af'">
                         <i class="fas fa-edit"></i>
                     </button>
-                    <button onclick="eliminarPlantilla('${p.id}', '${escHtml(p.nombre)}')" title="Eliminar" style="background:rgba(239,68,68,0.07); border:1px solid rgba(239,68,68,0.2); color:#f87171; padding:6px 10px; border-radius:8px; cursor:pointer; font-size:0.78rem;" onmouseover="this.style.background='rgba(239,68,68,0.15)'" onmouseout="this.style.background='rgba(239,68,68,0.07)'">
+                    <button onclick="eliminarPlantilla('${p.id}', '${escJs(p.nombre)}')" title="Eliminar" style="background:rgba(239,68,68,0.07); border:1px solid rgba(239,68,68,0.2); color:#f87171; padding:6px 10px; border-radius:8px; cursor:pointer; font-size:0.78rem;" onmouseover="this.style.background='rgba(239,68,68,0.15)'" onmouseout="this.style.background='rgba(239,68,68,0.07)'">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
@@ -2805,6 +2832,35 @@ function escHtml(str) {
         .replace(/>/g,'&gt;')
         .replace(/"/g,'&quot;')
         .replace(/'/g,'&#39;');
+}
+
+/**
+ * Escape para un valor dentro de un STRING de JavaScript que a su vez
+ * vive en un atributo HTML (onclick="fn('${...}')"). escHtml NO sirve
+ * ahí: el navegador decodifica &#39; de vuelta a comilla antes de
+ * ejecutar el JS, y una comilla simple rompe el string y permite
+ * inyectar código. Primero escapa para JS y después para HTML.
+ */
+function escJs(str) {
+    if (!str) return '';
+    return escHtml(String(str)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/"/g, '\\"')
+        .replace(/\r/g, '')
+        .replace(/\n/g, '\\n'));
+}
+
+/**
+ * Solo acepta colores hex seguros (#rgb, #rrggbb, #rrggbbaa). Un valor
+ * libre en un atributo style permite escapar la comilla e inyectar
+ * atributos (XSS), así que todo lo que no sea hex va al fallback.
+ */
+function cssColor(valor, fallback) {
+    if (typeof valor === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(valor.trim())) {
+        return valor.trim();
+    }
+    return fallback;
 }
 </script>
 </body>
