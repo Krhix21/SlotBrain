@@ -10,6 +10,8 @@ const botState = require('./botState');
 const bot = require('./bot');
 const numeros = require('./numeros');
 const notificaciones = require('./notificaciones');
+const whatsappCloud = require('./whatsappCloud');
+const voz = require('./voz');
 
 const app = express();
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
@@ -151,21 +153,74 @@ async function procesarWebhook(req) {
     }
 }
 
+/**
+ * Extrae teléfono y/o BSUID del mensaje entrante.
+ * Con usernames de WhatsApp (2026) Meta puede omitir `from` y mandar
+ * un Business-Scoped User ID (contacts[].user_id / from_user_id).
+ */
+function identidadRemitente(mensaje, value) {
+    const from = mensaje?.from ? String(mensaje.from).trim() : null;
+    let bsuid = null;
+
+    const contactos = Array.isArray(value?.contacts) ? value.contacts : [];
+    for (const c of contactos) {
+        const candidato = c?.user_id || c?.wa_id || null;
+        if (candidato && numeros.esBsuid && numeros.esBsuid(candidato)) {
+            bsuid = candidato;
+            break;
+        }
+        if (candidato && /^\s*[A-Z]{2}\./.test(String(candidato))) {
+            bsuid = String(candidato).trim();
+            break;
+        }
+    }
+
+    if (!bsuid) {
+        const alt = mensaje?.from_user_id || mensaje?.user_id || null;
+        if (alt && /^\s*[A-Z]{2}\./.test(String(alt))) bsuid = String(alt).trim();
+    }
+
+    // Si `from` ya es BSUID, no es teléfono.
+    if (from && /^\s*[A-Z]{2}\./.test(from)) {
+        return { telefonoCliente: null, bsuid: from.trim() };
+    }
+
+    return { telefonoCliente: from || null, bsuid };
+}
+
 async function procesarCambio(value) {
     const telefonoBot = numeros.normalizarTelefono(value?.metadata?.display_phone_number);
     const phoneNumberIdMeta = value?.metadata?.phone_number_id;
 
     for (const mensaje of value?.messages || []) {
-        const texto = extraerTexto(mensaje);
-        const telefonoCliente = mensaje.from;
+        const { telefonoCliente, bsuid } = identidadRemitente(mensaje, value);
 
-        if (!texto) {
-            console.log(`ℹ️  Mensaje de tipo "${mensaje.type}" sin texto plano, se ignora.`);
+        if (!telefonoCliente && !bsuid) {
+            console.warn('⚠️  Mensaje sin teléfono ni BSUID; se ignora.');
             continue;
         }
 
+        // El dedup va antes que cualquier trabajo pesado (como bajar y
+        // transcribir una nota de voz): así los reintentos de Meta no
+        // repiten la descarga ni generan dos respuestas.
         if (await yaProcesado(mensaje.id, telefonoBot)) {
             console.log(`♻️  Mensaje ${mensaje.id} duplicado, se ignora.`);
+            continue;
+        }
+
+        let texto = extraerTexto(mensaje);
+        let porVoz = false;
+
+        // Nota de voz: se descarga de Meta y se transcribe con Groq.
+        // El texto resultante entra al bot como un mensaje normal, y
+        // la bandera porVoz hace que el bot responda con voz clonada.
+        if (!texto && mensaje.type === 'audio') {
+            texto = await procesarNotaVoz(mensaje, phoneNumberIdMeta);
+            porVoz = Boolean(texto);
+        }
+
+        if (!texto) {
+            console.log(`ℹ️  Mensaje de tipo "${mensaje.type}" sin texto plano, se ignora.`);
             continue;
         }
 
@@ -176,13 +231,45 @@ async function procesarCambio(value) {
             telefonoBot,
             phoneNumberId: phoneNumberIdMeta,
             telefonoCliente,
+            bsuid,
             texto,
+            porVoz,
             messageId: mensaje.id
         })
             .catch(error => {
                 console.error('❌ Error en procesarMensajeWhatsapp:', error);
                 return liberarMensaje(mensaje.id);
             });
+    }
+}
+
+/**
+ * Convierte un mensaje de audio del webhook en texto: descarga el
+ * archivo de Meta y lo transcribe con Groq Whisper.
+ * Devuelve null si algo falla (y el mensaje se ignora, como hoy).
+ */
+async function procesarNotaVoz(mensaje, phoneNumberId) {
+    const mediaId = mensaje.audio?.id;
+    if (!mediaId) return null;
+
+    try {
+        const media = await whatsappCloud.descargarMedia(mediaId, phoneNumberId);
+        if (!media?.buffer?.length) {
+            console.warn('⚠️  No se pudo descargar la nota de voz; se ignora.');
+            return null;
+        }
+
+        const texto = await voz.transcribir(media.buffer, media.mimeType);
+        if (!texto) {
+            console.warn('⚠️  No se pudo transcribir la nota de voz; se ignora.');
+            return null;
+        }
+
+        console.log(`🎙️  Nota de voz transcrita: "${texto}"`);
+        return texto;
+    } catch (error) {
+        console.error('❌ Error procesando nota de voz:', error);
+        return null;
     }
 }
 

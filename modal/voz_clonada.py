@@ -1,0 +1,227 @@
+# Prueba de voz clonada en Modal con Qwen3-TTS (Botbarber2)
+#
+# Modo 1 (probar la voz):
+#   py -m modal run voz_clonada.py
+#   (genera salida_voz_1.ogg y salida_voz_2.ogg en esta misma carpeta)
+#   Con una frase propia:
+#   py -m modal run voz_clonada.py --texto "listo, te agendo a las 4" --out salida.ogg
+#
+# Modo 2 (endpoint para el bot, despues de que la voz te convenza):
+#   py -m modal deploy voz_clonada.py
+#   Te devuelve una URL https://...voz-clonada-api.modal.run donde se manda
+#   {"texto": "...", "ref_audio_b64": "..."} y responde el ogg con tu voz.
+#
+# Costo: T4 = 0,59 USD/hora cobrada por segundo (solo mientras corre).
+# El arranque frio descarga el modelo y tarda 1-2 minutos; cada frase tarda segundos.
+
+import base64
+import os
+import subprocess
+import tempfile
+
+import modal
+
+# ---------------------------------------------------------------- configuracion
+
+MODEL = "Qwen/Qwen3-TTS-12Hz-0.6B-Base"  # el aprobado en la Fase 0 del plan
+
+# Transcripcion EXACTA del sample, palabra por palabra (la que dijo Crhistian).
+REF_TEXT = (
+    "¡Hola cliente cómo vas? sí, si claro, "
+    "con mucho gusto te agendo la cita para esa hora"
+)
+
+# Ruta del sample en tu maquina (Grabacion de la app Grabadora de Voz).
+SAMPLE_LOCAL = "C:/Users/USUARIO/Documents/Grabaciones de sonido/Grabación.m4a"
+
+FRASES_PRUEBA = [
+    "Listo, te agendé el corte a las 3.",
+    "Hola, claro que sí. ¿Para cuándo te agendo la cita?",
+]
+
+image = (
+    modal.Image.debian_slim(python_version="3.12")
+    .apt_install("ffmpeg")
+    .pip_install("qwen-tts", "torch", "soundfile", "fastapi[standard]")
+    # El sample viaja con el deploy: asi el endpoint no necesita que el bot
+    # le mande el audio de referencia en cada llamada (solo el texto).
+    .add_local_file(SAMPLE_LOCAL, "/root/sample.m4a")
+)
+
+app = modal.App("voz-clonada", image=image)
+
+# ---------------------------------------------------------------- carga del modelo
+
+
+def _cargar_modelo():
+    import torch
+    from qwen_tts import Qwen3TTSModel
+
+    # OJO: float16 rompe la clonacion en GPUs sin bfloat16 (T4): produce NaN y
+    # el error "probability tensor contains inf, nan". Confirmado por el equipo
+    # de Qwen (issue #43): usar float32 en maquinas sin bfloat16.
+    # sdpa en vez de flash_attention_2 para no compilar nada en el arranque.
+    return Qwen3TTSModel.from_pretrained(
+        MODEL,
+        device_map="cuda:0",
+        dtype=torch.float32,
+        attn_implementation="sdpa",
+    )
+
+
+def _a_ogg_WhatsApp(wav_path: str) -> bytes:
+    """Convierte el wav a ogg/opus mono, listo para WhatsApp (ideal < 512 KB)."""
+    with tempfile.TemporaryDirectory() as d:
+        ogg = os.path.join(d, "out.ogg")
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", wav_path, "-c:a", "libopus", "-b:a", "24k", "-ac", "1", ogg],
+            check=True, capture_output=True,
+        )
+        with open(ogg, "rb") as f:
+            data = f.read()
+    return data
+
+
+def _sintetizar(model, ref_wav_path: str, texto: str) -> bytes:
+    import soundfile as sf
+
+    # El prompt de clonacion se calcula una sola vez por sample y se reutiliza.
+    prompt = model.create_voice_clone_prompt(ref_audio=ref_wav_path, ref_text=REF_TEXT)
+    wavs, sr = model.generate_voice_clone(
+        text=texto,
+        language="Spanish",
+        voice_clone_prompt=prompt,
+    )
+    with tempfile.TemporaryDirectory() as d:
+        wav = os.path.join(d, "out.wav")
+        sf.write(wav, wavs[0], sr)
+        return _a_ogg_WhatsApp(wav)
+
+
+# ---------------------------------------------------------------- modo 1: probar
+
+# El sample viaja de tu maquina al contenedor: se manda por parametro, no va
+# dentro de la imagen, asi cambiar la grabacion no requiere recompilar nada.
+
+
+@app.cls(gpu="T4", timeout=900, scaledown_window=300)
+class VozClonada:
+    @modal.enter()
+    def cargar(self):
+        self.model = _cargar_modelo()
+
+    @modal.method()
+    def generar(self, ref_audio_m4a: bytes, texto: str) -> bytes:
+        # m4a no lo lee el modelo directo: ffmpeg lo pasa a wav mono 16 kHz.
+        with tempfile.TemporaryDirectory() as d:
+            src = os.path.join(d, "ref.m4a")
+            wav = os.path.join(d, "ref.wav")
+            with open(src, "wb") as f:
+                f.write(ref_audio_m4a)
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", src, "-ac", "1", "-ar", "16000", wav],
+                check=True, capture_output=True,
+            )
+            return _sintetizar(self.model, wav, texto)
+
+
+@app.local_entrypoint()
+def main(
+    ref: str = SAMPLE_LOCAL,
+    texto: str = "",
+    out: str = "salida_voz.ogg",
+):
+    with open(ref, "rb") as f:
+        ref_bytes = f.read()
+
+    voz = VozClonada()
+    frases = [texto] if texto else FRASES_PRUEBA
+    for i, frase in enumerate(frases):
+        print(f"Generando frase {i + 1}/{len(frases)}: {frase}")
+        ogg = voz.generar.remote(ref_bytes, frase)
+        path = out if texto else f"salida_voz_{i + 1}.ogg"
+        with open(path, "wb") as f:
+            f.write(ogg)
+        kb = len(ogg) / 1024
+        print(f"  -> {path} ({kb:.0f} KB, {list(ogg[:4])})")
+
+
+# ---------------------------------------------------------------- modo 2: endpoint
+
+_modelo_endpoint = None  # cache por contenedor
+_ref_wav = None          # sample convertido a wav, una sola vez por contenedor
+_prompt_voz = None       # prompt de clonacion, una sola vez por contenedor
+
+
+def _preparar_sample():
+    """Convierte el sample embebido a wav mono 16 kHz (se hace una vez)."""
+    global _ref_wav
+    if _ref_wav is None:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", "/root/sample.m4a", "-ac", "1", "-ar", "16000", "/root/sample.wav"],
+            check=True, capture_output=True,
+        )
+        _ref_wav = "/root/sample.wav"
+    return _ref_wav
+
+
+def _prompt_clonado(model, ref_wav: str):
+    """Prompt de clonacion cacheado: recalcularlo en cada frase re-procesaria
+    el sample cada vez y sumaria segundos a cada respuesta del bot."""
+    global _prompt_voz
+    if _prompt_voz is None:
+        _prompt_voz = model.create_voice_clone_prompt(ref_audio=ref_wav, ref_text=REF_TEXT)
+    return _prompt_voz
+
+
+# scaledown_window=600: el contenedor queda caliente 10 minutos tras la
+# ultima frase. Si el cliente sigue conversando, no vuelve a pagar el
+# arranque frio (1-2 min). Si nadie escribe, se apaga y no cuesta nada.
+@app.function(gpu="T4", timeout=900, scaledown_window=600)
+@modal.fastapi_endpoint(method="POST")
+def api(body: dict):
+    """POST {"texto": "..."} -> ogg con la voz clonada del negocio."""
+    global _modelo_endpoint, _prompt_voz
+    if _modelo_endpoint is None:
+        _modelo_endpoint = _cargar_modelo()
+
+    texto = body["texto"]
+
+    # Ruta normal: el sample vive en la imagen desde el deploy.
+    # ref_audio_b64 sigue aceptandose por compatibilidad (probar otro sample
+    # sin redeplopear), pero el bot nunca lo manda.
+    if "ref_audio_b64" in body:
+        ref_bytes = base64.b64decode(body["ref_audio_b64"])
+        with tempfile.TemporaryDirectory() as d:
+            src = os.path.join(d, "ref.m4a")
+            wav = os.path.join(d, "ref.wav")
+            with open(src, "wb") as f:
+                f.write(ref_bytes)
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", src, "-ac", "1", "-ar", "16000", wav],
+                check=True, capture_output=True,
+            )
+            prompt = _modelo_endpoint.create_voice_clone_prompt(ref_audio=wav, ref_text=REF_TEXT)
+            ogg = _generar_con_prompt(_modelo_endpoint, prompt, texto)
+    else:
+        ref_wav = _preparar_sample()
+        prompt = _prompt_clonado(_modelo_endpoint, ref_wav)
+        ogg = _generar_con_prompt(_modelo_endpoint, prompt, texto)
+
+    from fastapi import Response
+
+    return Response(content=ogg, media_type="audio/ogg")
+
+
+def _generar_con_prompt(model, prompt, texto: str) -> bytes:
+    import soundfile as sf
+
+    wavs, sr = model.generate_voice_clone(
+        text=texto,
+        language="Spanish",
+        voice_clone_prompt=prompt,
+    )
+    with tempfile.TemporaryDirectory() as d:
+        wav = os.path.join(d, "out.wav")
+        sf.write(wav, wavs[0], sr)
+        return _a_ogg_WhatsApp(wav)

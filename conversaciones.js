@@ -1,21 +1,15 @@
 // ============================================================
 // Estado conversacional, guardado en Supabase (tabla `conversaciones`).
 //
-// Antes vivía en `conversaciones.json`, que en Render se pierde en
-// cada deploy y además se releía completo en cada operación (hasta 8
-// lecturas por mensaje). Ahora hay UN select y UN upsert por mensaje.
+// Clave dual (Meta usernames 2026):
+//   · preferida: (telefono_bot, telefono_cliente)
+//   · alternativa: (telefono_bot, bsuid) cuando Meta omite el número
 //
-// Topes para no saturar Supabase:
-//   - 1 fila por conversación, no 1 fila por mensaje
-//   - solo los últimos 6 mensajes, recortados a 500 caracteres
-//   - conversaciones sin actividad hace 30 días se eliminan
-//
-// Clave: (telefono_bot, telefono_cliente). El teléfono del bot entra en
-// la clave porque el mismo cliente puede hablar con dos empresas distintas
-// y su historial no debe mezclarse.
+// Topes: últimos 6 mensajes, 500 chars; barrido a los 30 días.
 // ============================================================
 
 const { createClient } = require('@supabase/supabase-js');
+const { esBsuid } = require('./whatsappCloud');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
@@ -26,58 +20,139 @@ const INTERVALO_BARRIDO_MS = 6 * 60 * 60 * 1000;
 
 let ultimoBarrido = 0;
 
-/** Estado vacío. */
 function vacia() {
     return {
         userName: null,
         mensajes: [],
         ultimaCita: null,
-        pendingBooking: null
+        pendingBooking: null,
+        pendingReminder: null,
+        pendingOwnerAction: null,
+        bsuid: null,
+        telefonoCliente: null
     };
 }
 
+function partirIdentidad(telefonoCliente, bsuid) {
+    let tel = telefonoCliente ? String(telefonoCliente).trim() : null;
+    let uid = bsuid ? String(bsuid).trim() : null;
+    if (tel && esBsuid(tel) && !uid) {
+        uid = tel;
+        tel = null;
+    }
+    if (uid && !esBsuid(uid)) uid = null;
+    return { telefonoCliente: tel || null, bsuid: uid || null };
+}
+
 /**
- * Carga el estado de una conversación.
- * @returns {Promise<{userName:string|null, mensajes:Array, ultimaCita:object|null, pendingBooking:object|null}>}
+ * @param {string} telefonoBot
+ * @param {string|null} telefonoCliente
+ * @param {{bsuid?:string|null}} [opts]
  */
-async function cargar(telefonoBot, telefonoCliente) {
-    const { data, error } = await supabase
-        .from('conversaciones')
-        .select('user_name, mensajes, ultima_cita, pending_booking')
-        .eq('telefono_bot', telefonoBot)
-        .eq('telefono_cliente', telefonoCliente)
-        .maybeSingle();
+async function cargar(telefonoBot, telefonoCliente, opts = {}) {
+    const id = partirIdentidad(telefonoCliente, opts.bsuid || null);
+    if (!telefonoBot || (!id.telefonoCliente && !id.bsuid)) return vacia();
+
+    let data = null;
+    let error = null;
+
+    if (id.telefonoCliente) {
+        ({ data, error } = await supabase
+            .from('conversaciones')
+            .select('user_name, mensajes, ultima_cita, pending_booking, pending_reminder, pending_owner_action, bsuid, telefono_cliente')
+            .eq('telefono_bot', telefonoBot)
+            .eq('telefono_cliente', id.telefonoCliente)
+            .maybeSingle());
+    }
+
+    if (!data && !error && id.bsuid) {
+        ({ data, error } = await supabase
+            .from('conversaciones')
+            .select('user_name, mensajes, ultima_cita, pending_booking, pending_reminder, pending_owner_action, bsuid, telefono_cliente')
+            .eq('telefono_bot', telefonoBot)
+            .eq('bsuid', id.bsuid)
+            .maybeSingle());
+    }
 
     if (error) {
         console.error('Error cargando conversación:', error.message);
         return vacia();
     }
 
-    if (!data) return vacia();
+    if (!data) {
+        const v = vacia();
+        v.telefonoCliente = id.telefonoCliente;
+        v.bsuid = id.bsuid;
+        return v;
+    }
 
     return {
         userName: data.user_name || null,
         mensajes: Array.isArray(data.mensajes) ? data.mensajes : [],
         ultimaCita: data.ultima_cita || null,
-        pendingBooking: data.pending_booking || null
+        pendingBooking: data.pending_booking || null,
+        pendingReminder: data.pending_reminder || null,
+        pendingOwnerAction: data.pending_owner_action || null,
+        bsuid: data.bsuid || id.bsuid || null,
+        telefonoCliente: data.telefono_cliente || id.telefonoCliente || null
     };
 }
 
-/** Persiste el estado. Aplica los topes antes de escribir. */
+/**
+ * Persiste el estado. Si conv.bsuid existe y no hay teléfono, upsert por BSUID.
+ * @param {string} telefonoBot
+ * @param {string|null} telefonoCliente
+ * @param {object} conv
+ */
 async function guardar(telefonoBot, telefonoCliente, conv) {
-    conv.mensajes = (conv.mensajes || []).slice(-MAX_MENSAJES);
+    if (!conv) return;
 
-    const { error } = await supabase.from('conversaciones').upsert(
-        {
-            telefono_bot: telefonoBot,
-            telefono_cliente: telefonoCliente,
-            user_name: conv.userName || null,
-            mensajes: conv.mensajes,
-            ultima_cita: conv.ultimaCita || null,
-            pending_booking: conv.pendingBooking || null
-        },
-        { onConflict: 'telefono_bot,telefono_cliente' }
+    const id = partirIdentidad(
+        telefonoCliente || conv.telefonoCliente,
+        conv.bsuid || null
     );
+
+    if (!telefonoBot || (!id.telefonoCliente && !id.bsuid)) {
+        console.error('Error guardando conversación: falta identidad (teléfono o bsuid)');
+        return;
+    }
+
+    conv.mensajes = (conv.mensajes || []).slice(-MAX_MENSAJES);
+    conv.telefonoCliente = id.telefonoCliente;
+    conv.bsuid = id.bsuid;
+
+    const fila = {
+        telefono_bot: telefonoBot,
+        telefono_cliente: id.telefonoCliente,
+        bsuid: id.bsuid,
+        user_name: conv.userName || null,
+        mensajes: conv.mensajes,
+        ultima_cita: conv.ultimaCita || null,
+        pending_booking: conv.pendingBooking || null,
+        pending_reminder: conv.pendingReminder || null,
+        pending_owner_action: conv.pendingOwnerAction || null
+    };
+
+    let error = null;
+
+    if (id.telefonoCliente) {
+        ({ error } = await supabase.from('conversaciones').upsert(fila, {
+            onConflict: 'telefono_bot,telefono_cliente'
+        }));
+    } else {
+        const { data: existente } = await supabase
+            .from('conversaciones')
+            .select('id')
+            .eq('telefono_bot', telefonoBot)
+            .eq('bsuid', id.bsuid)
+            .maybeSingle();
+
+        if (existente?.id) {
+            ({ error } = await supabase.from('conversaciones').update(fila).eq('id', existente.id));
+        } else {
+            ({ error } = await supabase.from('conversaciones').insert(fila));
+        }
+    }
 
     if (error) {
         console.error('Error guardando conversación:', error.message);
@@ -87,33 +162,27 @@ async function guardar(telefonoBot, telefonoCliente, conv) {
     barrerEnSegundoPlano();
 }
 
-/** Agrega un mensaje al buffer respetando el tope de 6. */
 function agregarMensaje(conv, role, content) {
     const limpio = String(content || '').slice(0, MAX_CHARS_MENSAJE);
     conv.mensajes = [...(conv.mensajes || []), { role, content: limpio }].slice(-MAX_MENSAJES);
 }
 
-/** ¿Es la primera interacción (no hay nombre ni historial)? */
 function esPrimeraConversacion(conv) {
     return !conv.userName && (!conv.mensajes || conv.mensajes.length === 0);
 }
 
-/** Elimina el estado de una conversación. */
-async function eliminar(telefonoBot, telefonoCliente) {
-    const { error } = await supabase
-        .from('conversaciones')
-        .delete()
-        .eq('telefono_bot', telefonoBot)
-        .eq('telefono_cliente', telefonoCliente);
+async function eliminar(telefonoBot, telefonoCliente, opts = {}) {
+    const id = partirIdentidad(telefonoCliente, opts.bsuid || null);
+    let query = supabase.from('conversaciones').delete().eq('telefono_bot', telefonoBot);
 
+    if (id.telefonoCliente) query = query.eq('telefono_cliente', id.telefonoCliente);
+    else if (id.bsuid) query = query.eq('bsuid', id.bsuid);
+    else return;
+
+    const { error } = await query;
     if (error) console.error('Error eliminando conversación:', error.message);
 }
 
-/**
- * Elimina conversaciones sin actividad hace más de DIAS_EXPIRA.
- * Corre una vez cada INTERVALO_BARRIDO_MS, en segundo plano y sin
- * bloquear la respuesta al cliente.
- */
 function barrerEnSegundoPlano() {
     if (Date.now() - ultimoBarrido < INTERVALO_BARRIDO_MS) return;
     ultimoBarrido = Date.now();
