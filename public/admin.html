@@ -1407,7 +1407,12 @@ function renderMiEmpresa() {
                     Guardar número
                 </button>
             </div>
+        </div>
+        <div id="cardVozBot" class="card fade-in" style="padding:1.5rem;">
+            <h3 style="font-size:0.95rem; font-weight:700; color:#fff; margin:0 0 6px;">Voz del bot</h3>
+            <p style="font-size:0.78rem; color:#9ca3af; margin:0;">Cargando…</p>
         </div>`;
+    cargarVozBot(emp.id);
 }
 
 async function guardarMiTelefonoAgente() {
@@ -1434,6 +1439,243 @@ async function guardarMiTelefonoAgente() {
 
 async function cargarMiEmpresa() {
     await cargarEmpresas(); // renderEmpresas también refresca renderMiEmpresa
+}
+
+// ─────────────────────────────────────────────
+// VOZ DEL BOT: una voz por empresa, elegida por el dueño.
+// El sample se graba con el micrófono o se sube (m4a/ogg/mp3/wav/webm,
+// máx. 5 MB). La transcripción EXACTA del sample la llena Whisper solo;
+// si falla, el dueño la escribe a mano. Antes de dejarla activa puede
+// escucharla con "Probar".
+// ─────────────────────────────────────────────
+let vozCache = null;         // fila activa de la empresa (o null)
+let vozEmpresaId = null;
+let grabadoraVoz = null;     // MediaRecorder activo
+let trozosGrabacionVoz = [];
+
+/** Guion sugerido para el sample: cubre saludo, pregunta, lista, precio,
+ *  confirmación y despedida — las cinco situaciones reales del bot. */
+function textoSugeridoSample() {
+    const emp = miEmpresaCache();
+    const nombre = emp ? emp.nombre : 'nuestro negocio';
+    return `Hola, bienvenido a ${nombre}. Claro que sí, con gusto te agendo. ¿Para qué día lo quieres? Tenemos corte clásico, fade y perfilado de barba. El corte clásico queda en veinte mil pesos. Perfecto, te espero mañana a las tres de la tarde. Cualquier cambio me avisas con gusto.`;
+}
+
+async function cargarVozBot(empresaId) {
+    vozEmpresaId = empresaId;
+    vozCache = null;
+    try {
+        const res = await apiFetch('GET', `/api/admin/voz/${empresaId}`);
+        if (res.ok) vozCache = (await res.json()).voz;
+        else if (res.status !== 404) console.error('voz:', res.status);
+    } catch (e) { if (e.message !== 'unauthorized') console.error(e); }
+    renderVozBot();
+}
+
+function renderVozBot() {
+    const cont = document.getElementById('cardVozBot');
+    if (!cont || !vozEmpresaId) return;
+
+    const sugerido = escHtml(textoSugeridoSample());
+
+    if (!vozCache) {
+        cont.innerHTML = `
+            <h3 style="font-size:0.95rem; font-weight:700; color:#fff; margin:0 0 6px;"><i class="fas fa-microphone-lines" style="margin-right:6px; color:var(--brand);"></i>Voz del bot</h3>
+            <p style="font-size:0.78rem; color:#9ca3af; margin:0 0 12px;">
+                Esta es la voz con la que el bot contesta las notas de voz de tus clientes (el recepcionista).
+                Grábala tú o la persona que quieras: 20–30 segundos, sitio silencioso y ritmo natural,
+                que es como va a hablar el bot.
+            </p>
+            <div class="card-inner" style="padding:0.85rem 1rem; margin-bottom:1rem;">
+                <p style="font-size:0.7rem; color:#4b5563; margin:0 0 4px; text-transform:uppercase; font-weight:600; letter-spacing:0.05em;">Texto sugerido para grabar</p>
+                <p id="textoSampleSugerido" style="font-size:0.8rem; color:#9ca3af; margin:0 0 8px;">${sugerido}</p>
+                <button onclick="copiarTextoSample()" style="background:rgba(255,255,255,0.04); border:1px solid #2a2a35; color:#9ca3af; padding:5px 10px; border-radius:8px; cursor:pointer; font-size:0.72rem;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#9ca3af'">
+                    <i class="fas fa-copy" style="margin-right:4px;"></i>Copiar texto
+                </button>
+            </div>
+            <div style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center; margin-bottom:0.75rem;">
+                <button id="btnGrabarVoz" onclick="grabarVozPanel()" class="btn-gold" style="padding:0.65rem 1.1rem; border-radius:10px; border:none; cursor:pointer; font-size:0.8rem;">
+                    <i class="fas fa-microphone" style="margin-right:5px;"></i>Grabar con el micrófono
+                </button>
+                <label class="btn-gold" style="padding:0.65rem 1.1rem; border-radius:10px; cursor:pointer; font-size:0.8rem;">
+                    <i class="fas fa-upload" style="margin-right:5px;"></i>Subir archivo de audio
+                    <input type="file" accept="audio/*,.m4a,.ogg,.mp3,.wav,.webm" style="display:none;" onchange="subirVozPanel(this.files)">
+                </label>
+            </div>
+            <p id="estadoVozPanel" style="font-size:0.75rem; color:#6b7280; margin:0;"></p>`;
+        return;
+    }
+
+    const kb = vozCache.tamano_bytes ? Math.round(vozCache.tamano_bytes / 1024) : null;
+    const fecha = vozCache.creado_en ? new Date(vozCache.creado_en).toLocaleDateString() : '';
+    cont.innerHTML = `
+        <h3 style="font-size:0.95rem; font-weight:700; color:#fff; margin:0 0 6px;"><i class="fas fa-microphone-lines" style="margin-right:6px; color:var(--brand);"></i>Voz del bot <span class="badge-green" style="padding:3px 9px; border-radius:99px; font-size:0.68rem; margin-left:6px;">Activa${fecha ? ' · ' + escHtml(fecha) : ''}${kb ? ' · ' + kb + ' KB' : ''}</span></h3>
+        <p style="font-size:0.78rem; color:#9ca3af; margin:0 0 12px;">
+            El bot responde las notas de voz con esta voz. Si cambias algo abajo, guarda y prueba de nuevo.
+        </p>
+        <div class="card-inner" style="padding:0.85rem 1rem; margin-bottom:0.75rem;">
+            <p style="font-size:0.7rem; color:#4b5563; margin:0 0 4px; text-transform:uppercase; font-weight:600; letter-spacing:0.05em;">Lo que dice la grabación (la usa el clonador; corrígela si Whisper la copió mal)</p>
+            <textarea id="vozRefText" rows="3" class="field input-glow" style="width:100%; padding:0.6rem 0.85rem; border-radius:10px; font-size:0.8rem;">${escHtml(vozCache.ref_text || '')}</textarea>
+        </div>
+        <div class="card-inner" style="padding:0.85rem 1rem; margin-bottom:0.75rem;">
+            <p style="font-size:0.7rem; color:#4b5563; margin:0 0 4px; text-transform:uppercase; font-weight:600; letter-spacing:0.05em;">Tono deseado (quedará activo cuando el modelo de voz lo soporte; hoy el tono sale de la grabación misma)</p>
+            <input id="vozEstilo" type="text" placeholder="Ej: amable, cercana y energética, como recepcionista" class="field input-glow" style="width:100%; padding:0.6rem 0.85rem; border-radius:10px; font-size:0.8rem;" value="${escHtml(vozCache.estilo || '')}">
+        </div>
+        <div style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
+            <button onclick="guardarVozAjustes()" class="btn-gold" style="padding:0.65rem 1.1rem; border-radius:10px; border:none; cursor:pointer; font-size:0.8rem;">
+                <i class="fas fa-save" style="margin-right:5px;"></i>Guardar ajustes
+            </button>
+            <button id="btnProbarVoz" onclick="probarVozPanel()" class="btn-gold" style="padding:0.65rem 1.1rem; border-radius:10px; border:none; cursor:pointer; font-size:0.8rem;">
+                <i class="fas fa-play" style="margin-right:5px;"></i>Probar voz
+            </button>
+            <button onclick="vozCache=null; renderVozBot()" style="background:rgba(255,255,255,0.04); border:1px solid #2a2a35; color:#9ca3af; padding:6px 12px; border-radius:8px; cursor:pointer; font-size:0.78rem;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#9ca3af'">
+                <i class="fas fa-redo" style="margin-right:5px;"></i>Reemplazar sample
+            </button>
+            <button onclick="eliminarVozPanel()" style="background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.35); color:#f87171; padding:6px 12px; border-radius:8px; cursor:pointer; font-size:0.78rem;" onmouseover="this.style.color='#fca5a5'" onmouseout="this.style.color='#f87171'">
+                <i class="fas fa-trash" style="margin-right:5px;"></i>Eliminar
+            </button>
+        </div>
+        <p id="estadoVozPanel" style="font-size:0.75rem; color:#6b7280; margin:0.5rem 0 0;"></p>`;
+}
+
+function copiarTextoSample() {
+    navigator.clipboard.writeText(textoSugeridoSample())
+        .then(() => showToast('Texto copiado: grábalo leyéndolo natural'))
+        .catch(() => showToast('No se pudo copiar; selecciónalo a mano', 'error'));
+}
+
+function estadoVozPanel(msg, esError = false) {
+    const el = document.getElementById('estadoVozPanel');
+    if (el) { el.textContent = msg; el.style.color = esError ? '#f87171' : '#6b7280'; }
+}
+
+/** Graba con el micrófono (MediaRecorder) y sube al soltar "Detener". */
+async function grabarVozPanel() {
+    const btn = document.getElementById('btnGrabarVoz');
+    if (grabadoraVoz && grabadoraVoz.state === 'recording') {
+        grabadoraVoz.stop();
+        return;
+    }
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus'
+            : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm'
+            : MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '';
+        trozosGrabacionVoz = [];
+        grabadoraVoz = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+        grabadoraVoz.ondataavailable = e => { if (e.data.size) trozosGrabacionVoz.push(e.data); };
+        grabadoraVoz.onstop = () => {
+            stream.getTracks().forEach(t => t.stop());
+            btn.innerHTML = '<i class="fas fa-microphone" style="margin-right:5px;"></i>Grabar con el micrófono';
+            const tipo = grabadoraVoz.mimeType || mime || 'audio/webm';
+            const blob = new Blob(trozosGrabacionVoz, { type: tipo });
+            grabadoraVoz = null;
+            if (blob.size < 2048) { estadoVozPanel('La grabación quedó vacía; inténtalo de nuevo', true); return; }
+            enviarVozBlob(blob, tipo);
+        };
+        grabadoraVoz.start();
+        btn.innerHTML = '<i class="fas fa-stop" style="margin-right:5px;"></i>Detener grabación';
+        estadoVozPanel('Grabando… lee el texto sugerido con calma y pulsa Detener al terminar.');
+    } catch (e) {
+        estadoVozPanel('No pude acceder al micrófono: revisa los permisos del navegador', true);
+    }
+}
+
+/** Sube un archivo de audio elegido por el dueño. */
+async function subirVozPanel(files) {
+    const f = files && files[0];
+    if (!f) return;
+    if (f.size > 5 * 1024 * 1024) { estadoVozPanel('El audio pasa de 5 MB', true); return; }
+    const tipo = f.type || 'audio/mpeg';
+    if (!/^audio\//.test(tipo) && !/\.m4a$/i.test(f.name)) {
+        estadoVozPanel('Ese archivo no es de audio', true);
+        return;
+    }
+    const lector = new FileReader();
+    lector.onload = () => enviarVozDataUrl(lector.result, tipo, f.size);
+    lector.onerror = () => estadoVozPanel('No se pudo leer el archivo', true);
+    lector.readAsDataURL(f);
+}
+
+async function enviarVozBlob(blob, tipo) {
+    const lector = new FileReader();
+    lector.onload = () => enviarVozDataUrl(lector.result, tipo, blob.size);
+    lector.onerror = () => estadoVozPanel('No se pudo leer la grabación', true);
+    lector.readAsDataURL(blob);
+}
+
+async function enviarVozDataUrl(dataUrl, tipo, tamano) {
+    estadoVozPanel('Subiendo la voz… la transcripción automática puede tardar unos segundos');
+    try {
+        const res = await apiFetch('POST', `/api/admin/voz/${vozEmpresaId}`, { data_url: dataUrl });
+        if (!res.ok) {
+            const e = await res.json().catch(() => ({}));
+            estadoVozPanel(e.error || ('Error HTTP ' + res.status), true);
+            return;
+        }
+        vozCache = (await res.json()).voz;
+        renderVozBot();
+        showToast('Voz registrada ✓ — escúchala con "Probar voz"');
+    } catch (e) {
+        if (e.message !== 'unauthorized') estadoVozPanel('Error subiendo la voz: ' + e.message, true);
+    }
+}
+
+async function guardarVozAjustes() {
+    const refText = document.getElementById('vozRefText')?.value.trim();
+    const estilo = document.getElementById('vozEstilo')?.value.trim();
+    if (!refText) { estadoVozPanel('La transcripción no puede quedar vacía', true); return; }
+    try {
+        const res = await apiFetch('PUT', `/api/admin/voz/${vozEmpresaId}`, { ref_text: refText, estilo });
+        if (!res.ok) {
+            const e = await res.json().catch(() => ({}));
+            estadoVozPanel(e.error || ('Error HTTP ' + res.status), true);
+            return;
+        }
+        vozCache = (await res.json()).voz;
+        estadoVozPanel('Ajustes guardados ✓');
+        showToast('Voz actualizada');
+    } catch (e) {
+        if (e.message !== 'unauthorized') estadoVozPanel('Error guardando: ' + e.message, true);
+    }
+}
+
+async function probarVozPanel() {
+    const btn = document.getElementById('btnProbarVoz');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right:5px;"></i>Generando…'; }
+    estadoVozPanel('Generando la frase con tu voz (puede tardar un rato la primera vez)…');
+    try {
+        const res = await apiFetch('POST', `/api/admin/voz/${vozEmpresaId}/probar`, {});
+        if (!res.ok) {
+            const e = await res.json().catch(() => ({}));
+            estadoVozPanel(e.error || ('Error HTTP ' + res.status), true);
+            return;
+        }
+        const blob = await res.blob();
+        new Audio(URL.createObjectURL(blob)).play();
+        estadoVozPanel('Esa es tu voz tal como la escucharán los clientes.');
+    } catch (e) {
+        if (e.message !== 'unauthorized') estadoVozPanel('Error probando la voz: ' + e.message, true);
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-play" style="margin-right:5px;"></i>Probar voz'; }
+    }
+}
+
+async function eliminarVozPanel() {
+    if (!confirm('¿Eliminar la voz de este negocio? El bot volverá a la voz por defecto.')) return;
+    try {
+        const res = await apiFetch('DELETE', `/api/admin/voz/${vozEmpresaId}`);
+        if (!res.ok) {
+            const e = await res.json().catch(() => ({}));
+            showToast(e.error || ('Error HTTP ' + res.status), 'error');
+            return;
+        }
+        vozCache = null;
+        renderVozBot();
+        showToast('Voz eliminada');
+    } catch (e) {
+        if (e.message !== 'unauthorized') showToast('Error eliminando la voz', 'error');
+    }
 }
 
 // ─────────────────────────────────────────────

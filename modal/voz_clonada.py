@@ -15,6 +15,7 @@
 # El arranque frio descarga el modelo y tarda 1-2 minutos; cada frase tarda segundos.
 
 import base64
+import hashlib
 import os
 import subprocess
 import tempfile
@@ -82,11 +83,11 @@ def _a_ogg_WhatsApp(wav_path: str) -> bytes:
     return data
 
 
-def _sintetizar(model, ref_wav_path: str, texto: str) -> bytes:
+def _sintetizar(model, ref_wav_path: str, ref_text: str, texto: str) -> bytes:
     import soundfile as sf
 
     # El prompt de clonacion se calcula una sola vez por sample y se reutiliza.
-    prompt = model.create_voice_clone_prompt(ref_audio=ref_wav_path, ref_text=REF_TEXT)
+    prompt = model.create_voice_clone_prompt(ref_audio=ref_wav_path, ref_text=ref_text)
     wavs, sr = model.generate_voice_clone(
         text=texto,
         language="Spanish",
@@ -150,7 +151,7 @@ def main(
 
 _modelo_endpoint = None  # cache por contenedor
 _ref_wav = None          # sample convertido a wav, una sola vez por contenedor
-_prompt_voz = None       # prompt de clonacion, una sola vez por contenedor
+_prompts = {}            # prompt de clonacion POR SAMPLE (clave = hash del audio)
 
 
 def _preparar_sample():
@@ -165,13 +166,16 @@ def _preparar_sample():
     return _ref_wav
 
 
-def _prompt_clonado(model, ref_wav: str):
-    """Prompt de clonacion cacheado: recalcularlo en cada frase re-procesaria
-    el sample cada vez y sumaria segundos a cada respuesta del bot."""
-    global _prompt_voz
-    if _prompt_voz is None:
-        _prompt_voz = model.create_voice_clone_prompt(ref_audio=ref_wav, ref_text=REF_TEXT)
-    return _prompt_voz
+def _prompt_para(model, ref_wav: str, ref_text: str, clave: str):
+    """Prompt de clonacion cacheado por sample: recalcularlo en cada frase
+    re-procesaria el audio cada vez y sumaria segundos a cada respuesta.
+    La clave distingue samples distintos (varias empresas pueden pasar por
+    el mismo contenedor caliente)."""
+    prompt = _prompts.get(clave)
+    if prompt is None:
+        prompt = model.create_voice_clone_prompt(ref_audio=ref_wav, ref_text=ref_text)
+        _prompts[clave] = prompt
+    return prompt
 
 
 # scaledown_window=600: el contenedor queda caliente 10 minutos tras la
@@ -180,18 +184,37 @@ def _prompt_clonado(model, ref_wav: str):
 @app.function(gpu="T4", timeout=900, scaledown_window=600)
 @modal.fastapi_endpoint(method="POST")
 def api(body: dict):
-    """POST {"texto": "..."} -> ogg con la voz clonada del negocio."""
-    global _modelo_endpoint, _prompt_voz
+    """POST {"texto": "...", "ref_audio_b64": "...", "ref_text": "..."} -> ogg.
+
+    Sin ref_audio_b64 usa el sample quemado en la imagen (voz por defecto).
+    Con ref_audio_b64 clona el sample que manda el bot: la voz ACTIVA de la
+    empresa que esta conversando (tabla `voces`). ref_text debe ser la
+    transcripcion EXACTA de ese audio (Qwen la exige para clonar bien).
+    """
+    global _modelo_endpoint
     if _modelo_endpoint is None:
         _modelo_endpoint = _cargar_modelo()
 
     texto = body["texto"]
+    # "estilo" llega desde el panel (tabla voces) pero el modelo de
+    # clonacion (Base) NO acepta instrucciones por llamada (solo los
+    # CustomVoice/VoiceDesign). Se acepta y se ignora por ahora, para que
+    # el dia que cambiemos de modelo no haya que tocar ni el bot ni el
+    # panel: el campo ya viaja.
+    # estilo = body.get("estilo")
 
     # Ruta normal: el sample vive en la imagen desde el deploy.
-    # ref_audio_b64 sigue aceptandose por compatibilidad (probar otro sample
-    # sin redeplopear), pero el bot nunca lo manda.
-    if "ref_audio_b64" in body:
+    if "ref_audio_b64" not in body:
+        ref_wav = _preparar_sample()
+        prompt = _prompt_para(_modelo_endpoint, ref_wav, REF_TEXT, "default")
+        ogg = _generar_con_prompt(_modelo_endpoint, prompt, texto)
+    else:
         ref_bytes = base64.b64decode(body["ref_audio_b64"])
+        # Transcripcion EXACTA del sample de la empresa. Si el bot no la
+        # manda (caller viejo), cae a la del sample quemado: peor clonacion
+        # pero nunca un 400 que deje al cliente sin nota de voz.
+        ref_text = str(body.get("ref_text") or "").strip() or REF_TEXT
+        clave = hashlib.md5(ref_bytes).hexdigest()
         with tempfile.TemporaryDirectory() as d:
             src = os.path.join(d, "ref.m4a")
             wav = os.path.join(d, "ref.wav")
@@ -201,12 +224,8 @@ def api(body: dict):
                 ["ffmpeg", "-y", "-i", src, "-ac", "1", "-ar", "16000", wav],
                 check=True, capture_output=True,
             )
-            prompt = _modelo_endpoint.create_voice_clone_prompt(ref_audio=wav, ref_text=REF_TEXT)
+            prompt = _prompt_para(_modelo_endpoint, wav, ref_text, clave)
             ogg = _generar_con_prompt(_modelo_endpoint, prompt, texto)
-    else:
-        ref_wav = _preparar_sample()
-        prompt = _prompt_clonado(_modelo_endpoint, ref_wav)
-        ogg = _generar_con_prompt(_modelo_endpoint, prompt, texto)
 
     from fastapi import Response
 

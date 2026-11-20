@@ -25,6 +25,87 @@ const whatsappCloud = require('./whatsappCloud');
 const GROQ_TRANSCRIPTION_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 const GROQ_MODEL = 'whisper-large-v3-turbo';
 
+// ----------------------------------------------------------------
+// Voz por empresa (tabla `voces`, bucket privado `voces`)
+//
+// Cada empresa tiene UNA voz activa elegida por el dueño desde el
+// panel. Al sintetizar, el sample de esa empresa viaja al endpoint de
+// Modal (ref_audio_b64 + ref_text); si la empresa no tiene voz
+// registrada, el endpoint usa el sample quemado en su deploy
+// (comportamiento de siempre, cero regresiones).
+// ----------------------------------------------------------------
+const BUCKET_VOCES = 'voces';
+const TTL_CACHE_VOZ = 5 * 60 * 1000;
+
+// empresaId -> { audio: Buffer, mimeType, refText, estilo, expira }
+// (sin `audio` = la empresa no tiene voz activa; también se cachea para
+// no golpear la base en cada nota de voz).
+const cacheVoces = new Map();
+
+function clienteSupabase() {
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) return null;
+    if (!_supabase) {
+        const { createClient } = require('@supabase/supabase-js');
+        _supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+    }
+    return _supabase;
+}
+let _supabase = null;
+
+/** Válida la caché (el panel la limpia al subir/editar la voz). */
+function limpiarCacheVoces() {
+    cacheVoces.clear();
+}
+
+/**
+ * Voz activa de una empresa, lista para mandar al endpoint de Modal.
+ * @param {string} empresaId
+ * @returns {Promise<{audio: Buffer, mimeType: string, refText: string, estilo: string|null}|null>}
+ *          null si no hay voz activa, no hay Supabase o algo falló.
+ */
+async function obtenerVozEmpresa(empresaId) {
+    if (!empresaId) return null;
+    const supa = clienteSupabase();
+    if (!supa) return null;
+
+    const hit = cacheVoces.get(empresaId);
+    if (hit && hit.expira > Date.now()) return hit.audio ? hit : null;
+
+    try {
+        const { data: fila, error: errFila } = await supa
+            .from('voces')
+            .select('id, storage_path, mime_type, ref_text, estilo')
+            .eq('empresa_id', empresaId)
+            .eq('activa', true)
+            .maybeSingle();
+
+        if (errFila) throw errFila;
+        if (!fila) {
+            cacheVoces.set(empresaId, { audio: null, expira: Date.now() + TTL_CACHE_VOZ });
+            return null;
+        }
+
+        const { data: blob, error: errSt } = await supa.storage
+            .from(BUCKET_VOCES)
+            .download(fila.storage_path);
+        if (errSt) throw errSt;
+
+        const voz = {
+            audio: Buffer.from(await blob.arrayBuffer()),
+            mimeType: fila.mime_type || 'audio/mpeg',
+            refText: fila.ref_text,
+            estilo: fila.estilo || null,
+            expira: Date.now() + TTL_CACHE_VOZ
+        };
+        cacheVoces.set(empresaId, voz);
+        return voz;
+    } catch (error) {
+        // Sin voz no se rompe nada: el endpoint cae al sample quemado.
+        console.warn(`⚠️  No se pudo cargar la voz de la empresa (${error.message}); se usa la voz por defecto.`);
+        return null;
+    }
+}
+
 // WhatsApp rechaza notas de voz pesadas; el endpoint ya sale en
 // opus 24 kbps, pero por si acaso validamos antes de subir.
 const LIMITE_OGG_BYTES = 512 * 1024;
@@ -261,9 +342,11 @@ async function transcribir(buffer, mimeType) {
 /**
  * Sintetiza un texto con la voz clonada del negocio.
  * @param {string} texto
+ * @param {{audio: Buffer, refText: string, estilo?: string|null}|null} [voz=null]
+ *        Voz de la empresa (obtenerVozEmpresa). null = sample quemado en el deploy.
  * @returns {Promise<Buffer|null>} ogg/opus listo para WhatsApp, o null
  */
-async function sintetizar(texto) {
+async function sintetizar(texto, voz = null) {
     const url = process.env.MODAL_VOICE_URL?.trim();
     if (!url) {
         console.warn('⚠️  Respuesta por voz omitida: falta MODAL_VOICE_URL (deploy del endpoint de Modal).');
@@ -271,10 +354,17 @@ async function sintetizar(texto) {
     }
 
     try {
+        const body = { texto };
+        if (voz && Buffer.isBuffer(voz.audio) && voz.audio.length) {
+            body.ref_audio_b64 = voz.audio.toString('base64');
+            if (voz.refText) body.ref_text = voz.refText;
+            if (voz.estilo) body.estilo = voz.estilo;
+        }
+
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ texto })
+            body: JSON.stringify(body)
         });
 
         if (!response.ok) {
@@ -303,10 +393,12 @@ async function sintetizar(texto) {
  * @param {string} numeroDestino - Sin "+" (o BSUID, tal como lo trata el bot)
  * @param {string} texto - Respuesta limpia del bot
  * @param {string} phoneNumberId
+ * @param {string|null} [empresaId=null] - Para usar la voz de esa empresa.
  * @returns {Promise<boolean>}
  */
-async function responderPorVoz(numeroDestino, texto, phoneNumberId) {
-    const ogg = await sintetizar(guionizarParaVoz(texto));
+async function responderPorVoz(numeroDestino, texto, phoneNumberId, empresaId = null) {
+    const vozEmpresa = await obtenerVozEmpresa(empresaId);
+    const ogg = await sintetizar(guionizarParaVoz(texto), vozEmpresa);
     if (!ogg) return false;
     return whatsappCloud.enviarNotaVoz(numeroDestino, ogg, phoneNumberId);
 }
@@ -316,5 +408,7 @@ module.exports = {
     sintetizar,
     responderPorVoz,
     limpiarParaVoz,
-    guionizarParaVoz
+    guionizarParaVoz,
+    obtenerVozEmpresa,
+    limpiarCacheVoces
 };
