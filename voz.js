@@ -49,6 +49,140 @@ function limpiarParaVoz(texto) {
         .trim();
 }
 
+// ---------------------------------------------------------------- guionizador
+//
+// Las frases de prueba sonaron naturales porque eran oraciones cortas y con
+// puntuación ("Listo, te agendé el corte a las 3."). El modelo usa la
+// puntuación como partitura: coma = pausa corta, punto = pausa larga, y las
+// oraciones cortas mantienen la entonación viva. Las respuestas del bot llegan
+// largas, con listas que al limpiarlas quedan atropelladas. Este paso las
+// convierte en un guion de voz: oraciones cortas, puntuación garantizada y
+// pausa después del saludo o la confirmación.
+
+// Palabras de arranque que suenan mejor con pausa: "Sí, te agendo..." suena a
+// persona; "Sí te agendo" sale atropellado. De la más larga a la más corta:
+// "claro que sí" es una unidad en español (la coma va después de los tres).
+// No incluimos "si" sin tilde: en "Si quieres te agendo" la coma sonaría mal.
+const LEADS_CON_PAUSA = [
+    'claro que sí', 'de acuerdo', 'perfecto', 'sí', 'claro', 'hola',
+    'listo', 'vale', 'okay', 'bueno', 'dale', 'ok', 'hey'
+];
+
+/**
+ * Agrega una pausa (coma) después del saludo o confirmación inicial de una
+ * oración, si no la trae y no termina justo ahí. Compara normalizado NFC para
+ * que las tildes coincieran vengan de donde vengan.
+ * @param {string} frase
+ * @returns {string}
+ */
+function _pausaInicial(frase) {
+    const f = frase.normalize('NFC');
+    const baja = f.toLowerCase();
+    for (const lead of LEADS_CON_PAUSA) {
+        if (!baja.startsWith(lead)) continue;
+        const resto = f.slice(lead.length);
+        if (/^\s/.test(resto)) {
+            // Sigue un espacio: el lead es la palabra suelta.
+            // Si la frase termina justo ahí o ya trae pausa, no toques nada.
+            if (/^\s*[,.;:!?…]/.test(resto)) return f;
+            return `${f.slice(0, lead.length)}, ${resto.trim()}`;
+        }
+        // Sin espacio: o termina justo tras el lead ("Sí."), o es prefijo de
+        // una palabra más larga ("síndrome"). En el primer caso, no tocar; en
+        // el segundo, probar el siguiente lead.
+        if (/^[,.;:!?…]/.test(resto)) return f;
+        continue;
+    }
+    return f;
+}
+
+/**
+ * Parte una oración larga en dos por un conector seguro. Nunca parte entre
+ * números, para no romper "de 9 a 12 y de 2 a 6". Recursiva: una parte que
+ * siga larga se vuelve a partir.
+ * @param {string} frase
+ * @returns {string[]}
+ */
+function _partirLarga(frase) {
+    if (frase.split(/\s+/).length <= 24) return [frase];
+
+    const conectores = /(,?\s+)(pero|porque|entonces|así que|además|y)(\s+)/gi;
+    let m;
+    while ((m = conectores.exec(frase)) !== null) {
+        const antes = frase.slice(0, m.index).trimEnd();
+        const despues = frase.slice(m.index + m[0].length).trim();
+        if (antes.split(/\s+/).length < 5) continue;            // no partes al inicio
+        if (/\d$/.test(antes) || /^\d/.test(despues)) continue; // no partas entre números
+        const conPunto = /[.!?…]$/.test(antes) ? antes : `${antes}.`;
+        return [
+            ..._partirLarga(conPunto),
+            ..._partirLarga(despues.charAt(0).toUpperCase() + despues.slice(1))
+        ];
+    }
+    return [frase];
+}
+
+/**
+ * Convierte la respuesta del bot en un guion que el TTS lee con pausas.
+ * Oraciones cortas, puntuación garantizada en cada una, pausa tras el
+ * saludo/confirmación y números protegidos (no parte "3:00" ni "20.000").
+ * @param {string} texto - Texto YA limpio (o crudo; lo limpia igual)
+ * @returns {string}
+ */
+function guionizarParaVoz(texto) {
+    let t = limpiarParaVoz(texto);
+    if (!t) return '';
+
+    // Símbolos que el TTS deletrea o pronuncia raro.
+    t = t
+        .replace(/\ba\.?m\.?\b/gi, 'am')
+        .replace(/\bp\.?m\.?\b/gi, 'pm')
+        .replace(/\s*[-–—]\s+/g, ', ')                        // "corte clásico - $20.000"
+        .replace(/&/g, ' y ')
+        .replace(/@/g, ' arroba ')
+        .replace(/%/g, ' por ciento')
+        .replace(/\$\s*(\d[\d.,]*\d|\d)/g, '$1 pesos')          // "$20.000" -> "20.000 pesos"
+        .replace(/pesos\s+(?=[A-ZÁÉÍÓÚÑ¿¡])/g, 'pesos. ')      // lista de precios -> oraciones
+        // Sin dígitos en el lookahead: no mete espacios dentro de "3:00" ni "20.000".
+        .replace(/([.!?,:;])(?=[A-Za-zÁÉÍÓÚÑáéíóúñ])/g, '$1 ');
+
+    // Protege separadores dentro de números ("20.000", "1,500", "3:00") para
+    // que ningún corte de oración los rompa. Se restauran al final.
+    const PUNTO = '\uE000';
+    const COMA = '\uE001';
+    const DOS_PUNTOS = '\uE002';
+    t = t.replace(/(\d)\.(?=\d)/g, `$1${PUNTO}`)
+         .replace(/(\d),(?=\d)/g, `$1${COMA}`)
+         .replace(/(\d):(?=\d)/g, `$1${DOS_PUNTOS}`);
+
+    // "; " y ": " separan ideas -> oraciones nuevas (los de hora ya están protegidos).
+    const oraciones = [];
+    for (const trozo of t.split(/\s*[;:]\s*/)) {
+        const pedazos = trozo.match(/[^.!?…]*[.!?…]+|[^.!?…]+/g) || [];
+        for (let p of pedazos) {
+            p = p.trim();
+            if (!p) continue;
+            for (let f of _partirLarga(p)) {
+                f = f.trim();
+                if (!f) continue;
+                if (!/[.!?…]$/.test(f)) f += '.';
+                // Pausa tras el saludo/confirmación inicial ("Sí, te agendo...").
+                f = _pausaInicial(f);
+                f = f.charAt(0).toUpperCase() + f.slice(1);
+                oraciones.push(f);
+            }
+        }
+    }
+
+    return oraciones
+        .join(' ')
+        .replace(new RegExp(PUNTO, 'g'), '.')
+        .replace(new RegExp(COMA, 'g'), ',')
+        .replace(new RegExp(DOS_PUNTOS, 'g'), ':')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+}
+
 /**
  * Transcribe un audio (ogg de WhatsApp) a texto con Groq Whisper.
  * @param {Buffer} buffer
@@ -141,7 +275,7 @@ async function sintetizar(texto) {
  * @returns {Promise<boolean>}
  */
 async function responderPorVoz(numeroDestino, texto, phoneNumberId) {
-    const ogg = await sintetizar(limpiarParaVoz(texto));
+    const ogg = await sintetizar(guionizarParaVoz(texto));
     if (!ogg) return false;
     return whatsappCloud.enviarNotaVoz(numeroDestino, ogg, phoneNumberId);
 }
@@ -150,5 +284,6 @@ module.exports = {
     transcribir,
     sintetizar,
     responderPorVoz,
-    limpiarParaVoz
+    limpiarParaVoz,
+    guionizarParaVoz
 };
