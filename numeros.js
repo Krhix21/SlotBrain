@@ -11,7 +11,7 @@
 // ============================================================
 
 const { createClient } = require('@supabase/supabase-js');
-const { normalizarTelefono } = require('./whatsappCloud');
+const { normalizarTelefono, esBsuid } = require('./whatsappCloud');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
@@ -137,5 +137,6 @@ module.exports = {
     listarPorEmpresa,
     obtenerEmpresaDeNumero,
     limpiarCache,
-    normalizarTelefono
+    normalizarTelefono,
+    esBsuid
 };

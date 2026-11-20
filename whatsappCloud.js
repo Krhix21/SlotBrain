@@ -204,22 +204,207 @@ async function marcarComoLeido(messageId, phoneNumberId) {
     }
 }
 
+// ============================================================
+// Media (notas de voz)
+//
+// Descarga: los mensajes de audio del webhook no traen el archivo,
+// solo su id. Para bajarlo son dos pasos contra Graph API: primero
+// se pide la metadata del media (que incluye la URL temporal) y
+// después se baja el binario de esa URL autenticado con el token.
+//
+// Envío: para mandar una nota de voz, el ogg/opus se sube primero
+// a Meta (endpoint /media) y el envío referencia el id devuelto.
+// WhatsApp reproduce como nota de voz el audio ogg/opus mono.
+// ============================================================
+
+function urlMedia(mediaId) {
+    return `https://graph.facebook.com/${GRAPH_API_VERSION}/${mediaId}`;
+}
+
+/**
+ * Descarga un archivo de media (por id) desde Meta.
+ * @param {string} mediaId - mensaje.audio.id del webhook
+ * @param {string} phoneNumberId - Número por el que llegó el mensaje
+ * @returns {Promise<{buffer:Buffer, mimeType:string|null}|null>}
+ */
+async function descargarMedia(mediaId, phoneNumberId) {
+    if (!mediaId) return null;
+
+    const cred = await credenciales(phoneNumberId);
+    if (!cred) return null;
+
+    try {
+        const infoRes = await fetch(urlMedia(mediaId), { headers: cabeceras(cred.token) });
+        if (!infoRes.ok) {
+            const data = await infoRes.json().catch(() => ({}));
+            const { tipo, motivo, crudo } = explicarErrorMeta(data);
+            console.error(`❌ No se pudo obtener la URL del media ${mediaId} [${tipo}]: ${motivo} (${crudo})`);
+            return null;
+        }
+
+        const info = await infoRes.json();
+        if (!info.url) {
+            console.error(`❌ Meta no devolvió URL para el media ${mediaId}.`);
+            return null;
+        }
+
+        const binRes = await fetch(info.url, { headers: { 'Authorization': `Bearer ${cred.token}` } });
+        if (!binRes.ok) {
+            console.error(`❌ Falló la descarga del media ${mediaId}: HTTP ${binRes.status}`);
+            return null;
+        }
+
+        const buffer = Buffer.from(await binRes.arrayBuffer());
+        return { buffer, mimeType: info.mime_type || null };
+    } catch (error) {
+        console.error('❌ Error de red descargando media de Meta:', error);
+        return null;
+    }
+}
+
+/**
+ * Sube un archivo a Meta y devuelve el id de media para referenciarlo
+ * en un envío. El token y el phone_number_id son los del número emisor.
+ * @param {Buffer} buffer - Contenido del archivo
+ * @param {string} mimeType - Ej. "audio/ogg"
+ * @param {string} phoneNumberId
+ * @returns {Promise<string|null>} id de media, o null si falló
+ */
+async function subirMedia(buffer, mimeType, phoneNumberId) {
+    const cred = await credenciales(phoneNumberId);
+    if (!cred) return null;
+
+    try {
+        const form = new FormData();
+        form.append('messaging_product', 'whatsapp');
+        form.append('file', new Blob([buffer], { type: mimeType }), 'nota_voz.ogg');
+
+        const response = await fetch(`https://graph.facebook.com/${GRAPH_API_VERSION}/${cred.phoneNumberId}/media`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${cred.token}` },
+            body: form
+        });
+
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            const { tipo, motivo, crudo } = explicarErrorMeta(data);
+            console.error(`❌ Subida de media a Meta RECHAZADA [${tipo}]`);
+            console.error(`   ${motivo}`);
+            console.error(`   crudo: ${crudo}`);
+            return null;
+        }
+
+        const data = await response.json();
+        return data.id || null;
+    } catch (error) {
+        console.error('❌ Error de red subiendo media a Meta:', error);
+        return null;
+    }
+}
+
+/**
+ * Envía una nota de voz ya subida a Meta (por su id de media).
+ * @param {string} numeroDestino - Sin "+" (ej. "573001234567")
+ * @param {string} mediaId - Id devuelto por subirMedia
+ * @param {string} phoneNumberId
+ * @returns {Promise<object|null>} payload de Meta si se admitió, null si no
+ */
+async function enviarMensajeVoz(numeroDestino, mediaId, phoneNumberId) {
+    const cred = await credenciales(phoneNumberId);
+    if (!cred || !mediaId) return null;
+
+    try {
+        const response = await fetch(urlMensajes(cred.phoneNumberId), {
+            method: 'POST',
+            headers: cabeceras(cred.token),
+            body: JSON.stringify({
+                messaging_product: 'whatsapp',
+                to: numeroDestino,
+                type: 'audio',
+                audio: { id: mediaId }
+            })
+        });
+
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            const { tipo, motivo, crudo } = explicarErrorMeta(data);
+            console.error(`❌ Nota de voz a ${numeroDestino} RECHAZADA por Meta [${tipo}]`);
+            console.error(`   ${motivo}`);
+            console.error(`   crudo: ${crudo}`);
+            return null;
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.error('❌ Error de red enviando nota de voz vía Cloud API:', error);
+        return null;
+    }
+}
+
+/**
+ * Atajo: sube el ogg y lo envía como nota de voz en un solo paso.
+ * @returns {Promise<boolean>} true si Meta admitió el audio
+ */
+async function enviarNotaVoz(numeroDestino, oggBuffer, phoneNumberId) {
+    const mediaId = await subirMedia(oggBuffer, 'audio/ogg', phoneNumberId);
+    if (!mediaId) return false;
+    const payload = await enviarMensajeVoz(numeroDestino, mediaId, phoneNumberId);
+    return Boolean(payload);
+}
+
+/**
+ * ¿Parece un BSUID de Meta (usernames WhatsApp)? Formato `CC.alfanumérico`.
+ * No es un teléfono: no se normaliza a dígitos.
+ */
+function esBsuid(valor) {
+    return typeof valor === 'string' && /^[A-Z]{2}\.[A-Za-z0-9]+$/.test(valor.trim());
+}
+
 /**
  * Normaliza cualquier teléfono a solo dígitos, sin signos ni prefijo "00".
  * El "display_phone_number" de Meta llega como "+1 555 555 0123" y
  * debe coincidir con el `telefono` guardado en `numeros_bot`.
+ *
+ * Con `codigoPaisDefault` (ej. "57"): si el valor parece local (10 dígitos
+ * sin código), se antepone el código. Evita que el panel guarde
+ * "3001234567" y el webhook mande "573001234567" sin match.
+ *
+ * Si el valor es un BSUID, se devuelve tal cual (no son dígitos).
+ *
  * @param {string} telefono
+ * @param {{codigoPaisDefault?:string}} [opciones]
  * @returns {string|null}
  */
-function normalizarTelefono(telefono) {
+function normalizarTelefono(telefono, opciones = {}) {
     if (!telefono) return null;
 
-    let digitos = String(telefono).replace(/\D/g, '');
+    const crudo = String(telefono).trim();
+    if (esBsuid(crudo)) return crudo;
+
+    let digitos = crudo.replace(/\D/g, '');
 
     // Prefijo internacional "00" -> ""
     if (digitos.startsWith('00')) digitos = digitos.slice(2);
 
-    return digitos || null;
+    if (!digitos) return null;
+
+    const codigo = String(opciones.codigoPaisDefault || '').replace(/\D/g, '');
+    if (codigo && !digitos.startsWith(codigo)) {
+        // Heurística LATAM: 10 dígitos locales (celular CO/MX típico).
+        if (digitos.length === 10) digitos = codigo + digitos;
+    }
+
+    return digitos;
 }
 
-module.exports = { enviarMensajeTexto, marcarComoLeido, normalizarTelefono, limpiarCacheTokens };
+module.exports = {
+    enviarMensajeTexto,
+    enviarNotaVoz,
+    enviarMensajeVoz,
+    subirMedia,
+    descargarMedia,
+    marcarComoLeido,
+    normalizarTelefono,
+    esBsuid,
+    limpiarCacheTokens
+};

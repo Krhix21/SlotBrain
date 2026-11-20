@@ -6,3 +6,7 @@ node_modules/
 # Residuos de whatsapp-web.js (ya no se usa, pero por si aparecen)
 .wwebjs_auth/
 .wwebjs_cache/
+
+# Artefactos de pruebas de voz
+__pycache__/
+modal/salida_voz_*.ogg

@@ -2,11 +2,15 @@ require('dotenv').config();
 const Groq = require('groq-sdk');
 const { createClient } = require('@supabase/supabase-js');
 
-const { enviarMensajeTexto, marcarComoLeido } = require('./whatsappCloud');
+const { enviarMensajeTexto, marcarComoLeido, esBsuid } = require('./whatsappCloud');
+const voz = require('./voz');
 const numeros = require('./numeros');
 const conversaciones = require('./conversaciones');
 const disponibilidad = require('./disponibilidad');
 const calendar = require('./calendar');
+const roles = require('./roles');
+const agenteDueno = require('./agenteDueno');
+const notificaciones = require('./notificaciones');
 const {
     formatearFechaLarga,
     formatearFechaCorta,
@@ -297,7 +301,8 @@ async function ejecutarAgendar({ config, bot, args, conv, telefonoCliente, userN
         fecha: pendiente.fecha,
         hora: pendiente.hora,
         telefonoCliente,
-        nombreCliente: userName
+        nombreCliente: userName,
+        bsuid: conv.bsuid || null
     });
 
     if (!resultado.exitoso) {
@@ -312,6 +317,14 @@ async function ejecutarAgendar({ config, bot, args, conv, telefonoCliente, userN
         trabajador: trabajador.nombre
     };
 
+    notificaciones.avisarDueno({
+        empresa: config.empresa,
+        tipo: 'nueva_cita',
+        texto:
+            `📅 Nueva cita: ${userName || telefonoCliente} — ${servicio.nombre} ` +
+            `${pendiente.fecha} ${pendiente.hora} con ${trabajador.nombre}`
+    }).catch(err => console.warn('⚠️  Aviso dueño (nueva):', err.message));
+
     return {
         ...resultado,
         servicio,
@@ -321,8 +334,12 @@ async function ejecutarAgendar({ config, bot, args, conv, telefonoCliente, userN
     };
 }
 
-async function ejecutarCancelar({ config, telefonoCliente }) {
-    const cita = await calendar.citaVigente({ empresa: config.empresa, telefonoCliente });
+async function ejecutarCancelar({ config, telefonoCliente, conv }) {
+    const cita = await calendar.citaVigente({
+        empresa: config.empresa,
+        telefonoCliente,
+        bsuid: conv?.bsuid || null
+    });
 
     if (!cita) {
         return { exitoso: false, mensaje: 'No encontré ninguna cita tuya para cancelar.' };
@@ -331,11 +348,32 @@ async function ejecutarCancelar({ config, telefonoCliente }) {
     const trabajador = await disponibilidad.obtenerTrabajadores(config.empresa.id, false)
         .then(lista => lista.find(t => t.id === cita.trabajador_id) || null);
 
-    return calendar.cancelarCita({ empresa: config.empresa, trabajador, cita, canceladoPor: 'cliente' });
+    const resultado = await calendar.cancelarCita({
+        empresa: config.empresa,
+        trabajador,
+        cita,
+        canceladoPor: 'cliente'
+    });
+
+    if (resultado.exitoso) {
+        notificaciones.avisarDueno({
+            empresa: config.empresa,
+            tipo: 'cancelada',
+            texto:
+                `🗑️ Cita cancelada: ${cita.nombre_cliente || telefonoCliente} — ` +
+                `${cita.nombre_servicio} ${cita.fecha} ${cita.hora}`
+        }).catch(err => console.warn('⚠️  Aviso dueño (cancel):', err.message));
+    }
+
+    return resultado;
 }
 
-async function ejecutarModificar({ config, args, telefonoCliente }) {
-    const cita = await calendar.citaVigente({ empresa: config.empresa, telefonoCliente });
+async function ejecutarModificar({ config, args, telefonoCliente, conv }) {
+    const cita = await calendar.citaVigente({
+        empresa: config.empresa,
+        telefonoCliente,
+        bsuid: conv?.bsuid || null
+    });
 
     if (!cita) {
         return { exitoso: false, mensaje: 'No encontré ninguna cita tuya para mover.' };
@@ -344,13 +382,25 @@ async function ejecutarModificar({ config, args, telefonoCliente }) {
     const trabajador = await disponibilidad.obtenerTrabajadores(config.empresa.id, false)
         .then(lista => lista.find(t => t.id === cita.trabajador_id) || null);
 
-    return calendar.modificarCita({
+    const resultado = await calendar.modificarCita({
         empresa: config.empresa,
         trabajador,
         cita,
         nuevaFecha: normalizarFecha(args.nueva_fecha),
         nuevaHora: normalizarHora(args.nueva_hora)
     });
+
+    if (resultado.exitoso) {
+        notificaciones.avisarDueno({
+            empresa: config.empresa,
+            tipo: 'modificada',
+            texto:
+                `↪️ Cita movida: ${cita.nombre_cliente || telefonoCliente} → ` +
+                `${resultado.cita.fecha} ${resultado.cita.hora}`
+        }).catch(err => console.warn('⚠️  Aviso dueño (move):', err.message));
+    }
+
+    return resultado;
 }
 
 /** El modelo puede devolver "28/09/2026" o "28 de septiembre": se normaliza a ISO. */
@@ -510,7 +560,7 @@ async function procesarToolCall({ nombre, argsCrudos, config, bot, conv, telefon
     }
 
     if (nombre === 'cancelar_cita') {
-        const resultado = await ejecutarCancelar({ config, telefonoCliente });
+        const resultado = await ejecutarCancelar({ config, telefonoCliente, conv });
 
         if (resultado.exitoso) conv.ultimaCita = null;
 
@@ -520,7 +570,7 @@ async function procesarToolCall({ nombre, argsCrudos, config, bot, conv, telefon
     }
 
     if (nombre === 'modificar_cita') {
-        const resultado = await ejecutarModificar({ config, args, telefonoCliente });
+        const resultado = await ejecutarModificar({ config, args, telefonoCliente, conv });
 
         if (resultado.exitoso) {
             conv.ultimaCita = {
@@ -536,6 +586,78 @@ async function procesarToolCall({ nombre, argsCrudos, config, bot, conv, telefon
     }
 
     return 'No pude entender eso. ¿Me lo repites?';
+}
+
+const TTL_REMINDER_MS = 6 * 60 * 60 * 1000;
+
+function leerPendingReminder(conv) {
+    const p = conv.pendingReminder;
+    if (!p || !p.citaId) return null;
+    if (p.expira && Date.now() > Number(p.expira)) {
+        conv.pendingReminder = null;
+        return null;
+    }
+    if (p.creadoEn && Date.now() - Number(p.creadoEn) > TTL_REMINDER_MS) {
+        conv.pendingReminder = null;
+        return null;
+    }
+    return p;
+}
+
+async function manejarRespuestaRecordatorio({ texto, conv, config, telefonoCliente }) {
+    const pendiente = leerPendingReminder(conv);
+    if (!pendiente) return null;
+
+    if (esConfirmacionAfirmativa(texto) && !esNegacion(texto)) {
+        const { error } = await supabase
+            .from('citas')
+            .update({ estado: 'confirmada' })
+            .eq('id', pendiente.citaId)
+            .in('estado', ['agendada', 'confirmada']);
+
+        conv.pendingReminder = null;
+
+        if (error) {
+            console.error('❌ Confirmar recordatorio:', error.message);
+            return 'No pude confirmar tu cita ahora. ¿Lo intentamos de nuevo?';
+        }
+
+        await notificaciones.registrarRespuestaCliente(pendiente.citaId, 'si');
+        return '¡Perfecto! Tu cita quedó confirmada. Te esperamos 🙌';
+    }
+
+    if (esNegacion(texto)) {
+        const cita = await calendar.citaVigente({
+            empresa: config.empresa,
+            telefonoCliente,
+            bsuid: conv.bsuid || null
+        });
+
+        conv.pendingReminder = null;
+        await notificaciones.registrarRespuestaCliente(pendiente.citaId, 'no');
+
+        if (cita && cita.id === pendiente.citaId) {
+            const trabajador = await disponibilidad.obtenerTrabajadores(config.empresa.id, false)
+                .then(lista => lista.find(t => t.id === cita.trabajador_id) || null);
+            await calendar.cancelarCita({
+                empresa: config.empresa,
+                trabajador,
+                cita,
+                canceladoPor: 'cliente',
+                motivo: 'cliente pidió cambiar tras recordatorio'
+            });
+            conv.ultimaCita = null;
+            notificaciones.avisarDueno({
+                empresa: config.empresa,
+                tipo: 'cancelada',
+                texto: `🗑️ ${cita.nombre_cliente || telefonoCliente} liberó ${cita.fecha} ${cita.hora} (recordatorio NO)`
+            }).catch(() => {});
+        }
+
+        return 'Entendido, liberé ese horario. ¿Qué día y servicio te acomodan para reagendar?';
+    }
+
+    return null;
 }
 
 // ============================================================
@@ -591,23 +713,50 @@ REGLAS INNEGOCIABLES
 // Punto de entrada (lo llama server.js desde el webhook)
 // ============================================================
 
-async function procesarMensajeWhatsapp({ telefonoBot, phoneNumberId, telefonoCliente, texto, messageId }) {
+async function procesarMensajeWhatsapp({ telefonoBot, phoneNumberId, telefonoCliente, bsuid = null, texto, porVoz = false, messageId }) {
     if (!texto || !texto.trim()) return;
 
-    const conv = await conversaciones.cargar(telefonoBot, telefonoCliente);
+    // Identidad dual: teléfono y/o BSUID (usernames Meta).
+    let tel = telefonoCliente || null;
+    let uid = bsuid || null;
+    if (tel && esBsuid(tel) && !uid) {
+        uid = tel;
+        tel = null;
+    }
+
+    const destinoEnvio = tel || uid;
+    if (!destinoEnvio) {
+        console.warn('⚠️  Mensaje sin destino (teléfono/BSUID); ignorado.');
+        return;
+    }
+
+    const conv = await conversaciones.cargar(telefonoBot, tel, { bsuid: uid });
+    if (uid) conv.bsuid = uid;
+    if (tel) conv.telefonoCliente = tel;
 
     const enviar = async (respuesta) => {
         const limpio = limpiarTexto(respuesta);
         if (!limpio) return;
-        await enviarMensajeTexto(telefonoCliente, limpio, phoneNumberId);
+
+        // El cliente escribió por voz -> respondemos con la voz clonada
+        // del negocio. Si la síntesis o el envío fallan, cae a texto:
+        // el cliente nunca se queda sin respuesta.
+        let enviadoPorVoz = false;
+        if (porVoz) {
+            enviadoPorVoz = await voz.responderPorVoz(destinoEnvio, limpio, phoneNumberId);
+            if (!enviadoPorVoz) console.warn('⚠️  Respuesta por voz no salió, se envía como texto.');
+        }
+        if (!enviadoPorVoz) {
+            await enviarMensajeTexto(destinoEnvio, limpio, phoneNumberId);
+        }
         conversaciones.agregarMensaje(conv, 'assistant', limpio);
     };
+
+    const persistir = async () => conversaciones.guardar(telefonoBot, tel, conv);
 
     try {
         if (messageId) marcarComoLeido(messageId, phoneNumberId).catch(() => {});
 
-        // La empresa se resuelve por el número receptor del webhook.
-        // El phone_number_id es la clave principal de routing.
         const empresaId = await resolverEmpresaId(telefonoBot, phoneNumberId);
         if (!empresaId) {
             console.error(`❌ El número ${telefonoBot} no está registrado en numeros_bot. Mensaje ignorado.`);
@@ -620,67 +769,131 @@ async function procesarMensajeWhatsapp({ telefonoBot, phoneNumberId, telefonoCli
             return;
         }
 
-        const userName = conv.userName || 'amigo';
         const zona = cfg.empresa.zona_horaria || 'America/Bogota';
+        const rol = await roles.resolverRol(empresaId, {
+            telefono: tel,
+            bsuid: uid,
+            empresa: cfg.empresa
+        });
 
-        // Si es la primera interacción hay que saludar. Se calcula ANTES de
-        // registrar el mensaje de este turno, porque registrarlo ya hace que
-        // la conversación deje de estar vacía.
-        const esPrimera = conversaciones.esPrimeraConversacion(conv);
-
-        // El mensaje del cliente pasa al historial antes de branching, así
-        // queda guardado en todos los caminos y el modelo ve el turno
-        // completo. Antes solo se guardaban las respuestas del bot.
         conversaciones.agregarMensaje(conv, 'user', texto);
 
-        // Primera interacción: solo pedimos el nombre.
+        // ── Modo dueño / staff / trabajador ───────────────────
+        if (roles.esModoDueno(rol)) {
+            const pendingOwner = agenteDueno.leerPendingOwner(conv);
+            if (pendingOwner && esConfirmacionAfirmativa(texto) && !esNegacion(texto)) {
+                const r = await agenteDueno.confirmarPendingOwner({ empresa: cfg.empresa, rol, conv });
+                await enviar(r.mensaje);
+                await persistir();
+                return;
+            }
+            if (pendingOwner && esNegacion(texto)) {
+                conv.pendingOwnerAction = null;
+                await enviar('Ok, no hago ese cambio.');
+                await persistir();
+                return;
+            }
+
+            const mensajes = [
+                { role: 'system', content: agenteDueno.construirPromptDueno({ empresa: cfg.empresa, rol, zona, conv }) },
+                ...conv.mensajes.map(m => ({ role: m.role, content: m.content }))
+            ];
+
+            const response = await groq.chat.completions.create({
+                model: MODELO,
+                messages: mensajes,
+                tools: agenteDueno.TOOLS_DUENO,
+                tool_choice: 'auto',
+                temperature: 0.3
+            });
+
+            const salida = response.choices[0].message;
+            const toolCall = salida.tool_calls?.[0];
+            let respuestaFinal;
+
+            if (toolCall) {
+                console.log(`🔧 Tool dueño: ${toolCall.function.name}`, toolCall.function.arguments);
+                const args = parseArgsBrutos(toolCall.function.arguments);
+                const r = await agenteDueno.procesarToolDueno({
+                    nombre: toolCall.function.name,
+                    args,
+                    empresa: cfg.empresa,
+                    rol,
+                    conv
+                });
+                respuestaFinal = r.mensaje || 'Listo.';
+            } else {
+                respuestaFinal = limpiarTexto(salida.content) || '¿En qué te ayudo con la agenda?';
+            }
+
+            await enviar(respuestaFinal);
+            await persistir();
+            return;
+        }
+
+        // ── Modo cliente ──────────────────────────────────────
+        const userName = conv.userName || 'amigo';
+        const esPrimera = conversaciones.esPrimeraConversacion({
+            userName: conv.userName,
+            mensajes: conv.mensajes.slice(0, -1)
+        });
+
         if (esPrimera) {
             const saludo = (cfg.empresa.mensaje_bienvenida
                 || '¡Hola! Bienvenido a {nombre_negocio}. 👋 Soy tu asesor virtual, ¿cómo te llamas?')
                 .replace('{nombre_negocio}', cfg.empresa.nombre);
 
             await enviar(saludo);
-            await conversaciones.guardar(telefonoBot, telefonoCliente, conv);
+            await persistir();
             return;
         }
 
-        // Segunda interacción: extraemos el nombre y seguimos.
         if (!conv.userName) {
             const nombre = await extraerNombre(texto);
             if (nombre) {
                 conv.userName = nombre;
                 await enviar(`¡Mucho gusto, ${nombre}! ¿En qué te ayudo hoy?`);
-                await conversaciones.guardar(telefonoBot, telefonoCliente, conv);
+                await persistir();
                 return;
             }
         }
 
+        // Loop cerrado de recordatorio (antes del pending de reserva).
+        const respReminder = await manejarRespuestaRecordatorio({
+            texto,
+            conv,
+            config: cfg,
+            telefonoCliente: tel
+        });
+        if (respReminder) {
+            await enviar(respReminder);
+            await persistir();
+            return;
+        }
+
         const pendiente = leerPending(conv);
 
-        // Confirmación directa de una oferta pendiente, sin gastar una llamada al modelo.
         if (pendiente && esConfirmacionAfirmativa(texto) && !esNegacion(texto)) {
             const respuesta = await procesarToolCall({
                 nombre: 'agendar_cita',
                 argsCrudos: { hora: pendiente.hora },
                 config: cfg,
                 conv,
-                telefonoCliente,
+                telefonoCliente: tel,
                 userName
             });
             await enviar(respuesta);
-            await conversaciones.guardar(telefonoBot, telefonoCliente, conv);
+            await persistir();
             return;
         }
 
         if (pendiente && esNegacion(texto)) {
             conv.pendingBooking = null;
             await enviar('Perfecto, no te aparto nada. ¿Buscamos otro horario?');
-            await conversaciones.guardar(telefonoBot, telefonoCliente, conv);
+            await persistir();
             return;
         }
 
-        // El mensaje actual ya está en conv.mensajes (se registró arriba),
-        // así que el historial se arma solo desde ahí, sin duplicarlo.
         const mensajes = [
             { role: 'system', content: construirPrompt({ config: cfg, conv, userName, zona }) },
             ...conv.mensajes.map(m => ({ role: m.role, content: m.content }))
@@ -706,7 +919,7 @@ async function procesarMensajeWhatsapp({ telefonoBot, phoneNumberId, telefonoCli
                 argsCrudos: toolCall.function.arguments,
                 config: cfg,
                 conv,
-                telefonoCliente,
+                telefonoCliente: tel,
                 userName
             });
         } else {
@@ -717,20 +930,14 @@ async function procesarMensajeWhatsapp({ telefonoBot, phoneNumberId, telefonoCli
         }
 
         await enviar(respuestaFinal);
-        await conversaciones.guardar(telefonoBot, telefonoCliente, conv);
+        await persistir();
 
     } catch (error) {
         console.error('❌ Error procesando el mensaje:', error);
 
-        // Si el aviso de fallo sí salió, el cliente ya sabe que hay un
-        // problema y va a escribir un mensaje nuevo (con otro message_id),
-        // así que no hace falta reintentar este.
-        // Si el aviso NO se pudo enviar, el cliente se quedó esperando sin
-        // saber nada: en ese caso se relanza para que server.js suelte la
-        // reserva del dedup y el reintento de Meta pueda responderle.
         try {
             await enviarMensajeTexto(
-                telefonoCliente,
+                destinoEnvio,
                 'Tengo problemas técnicos en este momento. ¿Me lo intentas de nuevo en un momento?',
                 phoneNumberId
             );

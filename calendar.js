@@ -63,7 +63,7 @@ async function trabajadorEstaConectado(trabajadorId) {
  *
  * @returns {Promise<{exitoso:boolean, mensaje:string, cita?:object}>}
  */
-async function agendarCita({ empresa, trabajador, servicio, fecha, hora, telefonoCliente, nombreCliente }) {
+async function agendarCita({ empresa, trabajador, servicio, fecha, hora, telefonoCliente, nombreCliente, bsuid = null }) {
     const problema = validacion(fecha, hora);
     if (problema) return { exitoso: false, mensaje: problema };
 
@@ -138,8 +138,9 @@ async function agendarCita({ empresa, trabajador, servicio, fecha, hora, telefon
         .insert({
             empresa_id: empresa.id,
             trabajador_id: trabajador.id,
-            nombre_cliente: nombreCliente || telefonoCliente,
-            telefono_cliente: telefonoCliente,
+            nombre_cliente: nombreCliente || telefonoCliente || bsuid || 'cliente',
+            telefono_cliente: telefonoCliente || null,
+            bsuid: bsuid || null,
             servicio_id: servicio?.id || null,
             nombre_servicio: servicio?.nombre || 'Servicio',
             fecha,
@@ -171,13 +172,16 @@ async function agendarCita({ empresa, trabajador, servicio, fecha, hora, telefon
  * Se consulta la tabla `citas`, no el summary del evento: buscar por
  * nombre en el calendario rompía con dos clientes homónimos.
  */
-async function buscarCita({ empresa, telefonoCliente, fecha, hora }) {
+async function buscarCita({ empresa, telefonoCliente, fecha, hora, bsuid = null }) {
     let consulta = supabase
         .from('citas')
         .select('*')
         .eq('empresa_id', empresa.id)
-        .eq('telefono_cliente', telefonoCliente)
         .in('estado', ESTADOS_VIGENTES);
+
+    if (telefonoCliente) consulta = consulta.eq('telefono_cliente', telefonoCliente);
+    else if (bsuid) consulta = consulta.eq('bsuid', bsuid);
+    else return null;
 
     if (fecha) consulta = consulta.eq('fecha', fecha);
     if (hora) consulta = consulta.eq('hora', hora);
@@ -194,13 +198,16 @@ async function buscarCita({ empresa, telefonoCliente, fecha, hora }) {
 }
 
 /** Cita vigente más próxima del cliente, para "cancélala" sin dar la fecha. */
-async function citaVigente({ empresa, telefonoCliente }) {
+async function citaVigente({ empresa, telefonoCliente, bsuid = null }) {
     let consulta = supabase
         .from('citas')
         .select('*')
         .eq('empresa_id', empresa.id)
-        .eq('telefono_cliente', telefonoCliente)
         .in('estado', ESTADOS_VIGENTES);
+
+    if (telefonoCliente) consulta = consulta.eq('telefono_cliente', telefonoCliente);
+    else if (bsuid) consulta = consulta.eq('bsuid', bsuid);
+    else return null;
 
     const { data, error } = await consulta.order('fecha', { ascending: true }).limit(1);
 

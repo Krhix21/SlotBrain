@@ -66,8 +66,9 @@ cp .env.example .env
 **Base nueva:** ejecuta `supabase-schema.sql`.
 
 **Base que ya tiene los datos de la versión anterior:** ejecuta, en este
-orden, `supabase-migracion-v2.sql`, `supabase-migracion-v3.sql` y
-`supabase-migracion-v4-usuarios-admin.sql`. Los archivos son idempotentes y
+orden, `supabase-migracion-v2.sql` … hasta `supabase-migracion-v9-agente-dueno.sql`
+(v4 usuarios admin, v5 marca/nicho/notificaciones, v6–v8 tokens/WABA/plantillas,
+v9 agente dueño + BSUID + auditoría). Los archivos son idempotentes y
 las migraciones crean copias `_bak_*` antes de tocar nada.
 
 La v2 hace, entre otras cosas:
@@ -207,8 +208,11 @@ Europa con el horario de verano mal puesto.
 | `tiempo.js` | Zonas horarias y formato de fechas |
 | `conversaciones.js` | Estado conversacional en Supabase |
 | `admin.js` | API del panel, con listas blancas y scoping multi-tenant |
+| `roles.js` | Rol del remitente WhatsApp (cliente vs dueño/staff) |
+| `agenteDueno.js` | Tools de operación diaria del dueño |
+| `notificaciones.js` | Recordatorios, digest matutino, avisos al dueño |
 | `scripts/crear-usuario.js` | Crear usuarios del panel (`npm run crear-usuario`) |
-| `docs/` | CODEBASE.md, CALENDARIO-GRATIS.md, ROADMAP-MULTITENANT.md |
+| `docs/` | CODEBASE.md, ROADMAP-MULTITENANT.md, REVISION-PLAN-AGENTE-DUENO.md |
 | `botState.js` | Estado mínimo de la sesión |
 
 ## Cosas que cambiaron respecto a la versión 1

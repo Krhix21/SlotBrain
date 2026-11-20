@@ -2,6 +2,7 @@ const { createClient } = require('@supabase/supabase-js');
 const crypto = require('crypto');
 const numeros = require('./numeros');
 const bot = require('./bot');
+const roles = require('./roles');
 const { firmarLink } = require('./auth');
 const { zonedToUtc } = require('./tiempo');
 const tokensMeta = require('./tokensMeta');
@@ -82,7 +83,7 @@ async function requireAuth(req, res, next) {
 
     const { data: sesion, error } = await supabase
         .from('sesiones_admin')
-        .select('token, expira, usuarios_admin (id, email, empresa_id, rol, activo)')
+        .select('token, expira, usuarios_admin (id, email, empresa_id, rol, activo, telefono, bsuid)')
         .eq('token', token)
         .maybeSingle();
 
@@ -106,7 +107,9 @@ async function requireAuth(req, res, next) {
         id: usuario.id,
         email: usuario.email,
         empresa_id: usuario.empresa_id,
-        rol: usuario.rol
+        rol: usuario.rol,
+        telefono: usuario.telefono || null,
+        bsuid: usuario.bsuid || null
     };
     next();
 }
@@ -194,7 +197,7 @@ async function login(req, res) {
 
     const { data: usuario, error } = await supabase
         .from('usuarios_admin')
-        .select('id, email, password_hash, rol, empresa_id, activo, debe_cambiar_clave')
+        .select('id, email, password_hash, rol, empresa_id, telefono, activo, debe_cambiar_clave')
         .eq('email', email)
         .maybeSingle();
 
@@ -230,9 +233,11 @@ async function login(req, res) {
 
     res.json({
         token,
+        id: usuario.id,
         usuario: usuario.email,
         rol: usuario.rol,
         empresa_id: usuario.empresa_id,
+        telefono: usuario.telefono || null,
         debe_cambiar_clave: usuario.debe_cambiar_clave === true
     });
 }
@@ -245,7 +250,14 @@ async function logout(req, res) {
 }
 
 function validateSession(req, res) {
-    res.json({ valid: true, usuario: req.usuario.email, rol: req.usuario.rol, empresa_id: req.usuario.empresa_id });
+    res.json({
+        valid: true,
+        usuario: req.usuario.email,
+        id: req.usuario.id,
+        rol: req.usuario.rol,
+        empresa_id: req.usuario.empresa_id,
+        telefono: req.usuario.telefono || null
+    });
 }
 
 // ============================================================
@@ -332,7 +344,7 @@ async function getUsuarios(req, res) {
     try {
         let consulta = supabase
             .from('usuarios_admin')
-            .select('id, email, rol, empresa_id, activo, creado_en')
+            .select('id, email, rol, empresa_id, telefono, bsuid, activo, creado_en')
             .order('creado_en');
 
         if (esSuperadmin(req)) {
@@ -350,9 +362,20 @@ async function getUsuarios(req, res) {
     }
 }
 
+async function codigoPaisEmpresa(empresaId) {
+    if (!empresaId) return '57';
+    const { data } = await supabase
+        .from('empresas')
+        .select('politicas')
+        .eq('id', empresaId)
+        .maybeSingle();
+    const p = (data && typeof data.politicas === 'object' && data.politicas) || {};
+    return String(p.codigo_pais || '57').replace(/\D/g, '') || '57';
+}
+
 async function createUsuario(req, res) {
     try {
-        const { email, password, rol = 'staff', empresa_id } = req.body || {};
+        const { email, password, rol = 'staff', empresa_id, telefono } = req.body || {};
 
         if (!correoValido(email)) return fallo(res, 'Envía un correo válido');
 
@@ -379,6 +402,12 @@ async function createUsuario(req, res) {
             if (!empresaId) return fallo(res, 'empresa_id es requerido');
         }
 
+        let telefonoNorm = null;
+        if (telefono) {
+            const codigo = await codigoPaisEmpresa(empresaId);
+            telefonoNorm = numeros.normalizarTelefono(telefono, { codigoPaisDefault: codigo });
+        }
+
         const { data, error } = await supabase
             .from('usuarios_admin')
             .insert({
@@ -386,13 +415,14 @@ async function createUsuario(req, res) {
                 password_hash: bcrypt.hashSync(passwordFinal, 10),
                 rol,
                 empresa_id: empresaId,
+                telefono: telefonoNorm,
                 debe_cambiar_clave: usaClaveTemporal
             })
-            .select('id, email, rol, empresa_id, activo, creado_en, debe_cambiar_clave')
+            .select('id, email, rol, empresa_id, telefono, bsuid, activo, creado_en, debe_cambiar_clave')
             .single();
 
         if (error) {
-            if (error.code === '23505') return fallo(res, 'Ese correo ya tiene un usuario', 409);
+            if (error.code === '23505') return fallo(res, 'Ese correo o teléfono ya está en uso en la empresa', 409);
             throw error;
         }
 
@@ -407,10 +437,10 @@ async function createUsuario(req, res) {
     }
 }
 
-/** Acepta: password (nueva), password_actual (solo cambio propio), rol, activo, debe_cambiar_clave. */
+/** Acepta: password, password_actual, rol, activo, debe_cambiar_clave, telefono. */
 async function updateUsuario(req, res) {
     try {
-        const updates = soloCampos(req.body, ['password', 'rol', 'activo', 'debe_cambiar_clave']);
+        const updates = soloCampos(req.body, ['password', 'rol', 'activo', 'debe_cambiar_clave', 'telefono']);
         if (Object.keys(updates).length === 0) {
             return fallo(res, 'No enviaste ningún campo editable');
         }
@@ -469,14 +499,29 @@ async function updateUsuario(req, res) {
             return fallo(res, 'No puedes desactivar tu propio usuario');
         }
 
+        if (updates.telefono !== undefined) {
+            if (updates.telefono === null || updates.telefono === '') {
+                updates.telefono = null;
+            } else {
+                const codigo = await codigoPaisEmpresa(usuario.empresa_id);
+                updates.telefono = numeros.normalizarTelefono(updates.telefono, { codigoPaisDefault: codigo });
+                if (!updates.telefono) return fallo(res, 'Teléfono inválido');
+            }
+        }
+
         const { data, error } = await supabase
             .from('usuarios_admin')
             .update(updates)
             .eq('id', usuario.id)
-            .select('id, email, rol, empresa_id, activo, debe_cambiar_clave')
+            .select('id, email, rol, empresa_id, telefono, bsuid, activo, debe_cambiar_clave')
             .single();
 
-        if (error) throw error;
+        if (error) {
+            if (error.code === '23505') return fallo(res, 'Ese teléfono ya está en uso en la empresa', 409);
+            throw error;
+        }
+
+        if (updates.telefono !== undefined) roles.limpiarCache();
 
         // Al desactivar o bajar de rol, se cierran sus sesiones vivas.
         if (updates.activo === false) {
@@ -750,6 +795,17 @@ async function updateEmpresa(req, res) {
             return fallo(res, 'No enviaste ningún campo editable');
         }
 
+        // Fusionar politicas para no borrar claves internas (ej. ultimo_digest_fecha).
+        if (updates.politicas && typeof updates.politicas === 'object') {
+            const { data: actual } = await supabase
+                .from('empresas')
+                .select('politicas')
+                .eq('id', req.params.id)
+                .maybeSingle();
+            const prev = (actual && typeof actual.politicas === 'object' && actual.politicas) || {};
+            updates.politicas = { ...prev, ...updates.politicas };
+        }
+
         const { data, error } = await supabase
             .from('empresas')
             .update(updates)
@@ -761,6 +817,7 @@ async function updateEmpresa(req, res) {
         if (!data) return fallo(res, 'Empresa no encontrada', 404);
 
         bot.limpiarCacheConfiguracion();
+        roles.limpiarCache();
         res.json(data);
     } catch (error) {
         servidorError(res, 'Error actualizando empresa', error);

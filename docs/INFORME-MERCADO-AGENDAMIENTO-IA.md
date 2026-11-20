@@ -1,6 +1,6 @@
 # Informe: Agendamiento de citas con IA — mercado vs SlotBrain
 
-*Investi (Mi Negocio) · 16/11/2026 · precios verificados en webs oficiales y comparativas de oct-nov 2026*
+*Investi (Mi Negocio) · 16-17/11/2026 · precios verificados en webs oficiales y comparativas de oct-nov 2026*
 
 ---
 
@@ -27,6 +27,7 @@ Dato del sector: sin recordatorios, los no-shows en belleza/salud rondan 10-30% 
 | **SuperTurno** | Agenda con IA en todos los planes | Sí | 19 USD (1 prof), 49 USD (4) | Sí |
 | **Bewe** (España) | Agenda + marketing | Linda, desde Growth (300 convers./mes) | 29 USD; Growth 59 USD | Sí |
 | **Wati** | Plataforma WhatsApp API con chatbots | Flujos | 49 USD (5 agentes) | Sí, no agenda por sí solo |
+| **WeiBook** (Colombia) | Suite de gestión belleza/barbería + perfil público de reserva (book.weibook.co) | Wanda IA: agente WhatsApp 24/7 que agenda y reagenda — **se paga aparte** | 15 / 18 / 39 / 99 USD según nº de profesionales | Extra: 15 USD/mes por vincular WhatsApp |
 | **Citalvo** (Colombia) | Agenda LATAM | No destacada | Gratis 15 citas/mes; 39k-129k COP | API en planes de pago |
 | **OSBOOK** (Colombia) | Agenda barbería | No | 30k COP 1 prof; WhatsApp incluido | Sí |
 | **Clara** | Asistente por email, negocia como humano | CC model | ~80-99 USD/mes | No (email) |
@@ -82,7 +83,31 @@ Eso ES un recordatorio, pero es un **aviso de un solo toque, sin ciclo**. Lo que
 
 ---
 
-## 5. Fuentes
+## 5. WeiBook (Colombia): competencia directa confirmada
+
+*Investigación del 17/11/2026, a partir del caso real de book.weibook.co/xheros-barberia.*
+
+**Quiénes son:** startup bogotana fundada en 2021 por Julio Hincapié, después de que su propio negocio de belleza quebrara sin visibilidad de la operación. Respaldada por 500 Global (lista Forbes 2023), expandiendo a Brasil. Cifras que presumen: más de 20 millones de citas reservadas, más de 3.000 negocios activos en 18 países, unos 25.000 profesionales y cerca de 2 millones de citas gestionadas al mes.
+
+**En qué se parece a SlotBrain (el corazón del producto):** su arma estrella es "Wanda IA", un agente de inteligencia artificial que atiende el WhatsApp propio del negocio 24/7: conversa, agenda y reagenda en tiempo real, reconoce servicios/precios/horarios, envía recordatorios automáticos y lanza campañas por WhatsApp. Además tienen un perfil público de reserva por negocio (book.weibook.co) y cobro de anticipos por servicio para reducir no-shows ("cobra antes del corte"). Es decir: WeiBook ya hace, en Colombia, lo esencial de lo que hace SlotBrain.
+
+**En qué se diferencia:** WeiBook es primero un software de gestión completo (agenda, CRM, punto de venta, caja, inventario, comisiones, historias clínicas, facturación electrónica, reportes y app móvil). La IA de WhatsApp NO viene incluida: se paga aparte, igual que la vinculación del número. Precios en dólares: HomeStudio 15 USD/mes (1 profesional), Basic 18 (2-3), Ultra 39 (hasta 10), Unlimited 99 (más de 10); WhatsApp +15 USD/mes; Wanda IA +50 USD/mes. Un negocio de 3 personas con WhatsApp e IA paga unos 83 USD/mes (~330.000 COP). En sus planes bajos los recordatorios van solo por email.
+
+**Flujo real verificado (Xheros Barbería):** el book es un mini-sitio estático: formulario servicio → profesional → fecha → hora. Con la Wallet de anticipos activada (configurable servicio por servicio), confirmar la cita exige pagar el abono con tarjeta o transferencia con comprobante — el mensaje real al cliente es "En tu selección hay servicios que requieren un abono para ser reservados". Pagar para reservar es flujo normal de WeiBook cuando el negocio activa anticipos, no un error de esa barbería.
+
+**Diferenciales que SlotBrain puede construir:**
+
+1. **Reservar conversando, no llenando formularios.** El book de WeiBook es un formulario estático. En SlotBrain el cliente escribe "quiero corte mañana a las 3 con Camilo" y listo. La IA de ellos cuesta 50 USD/mes extra; la nuestra es el producto.
+2. **Reserva sin fricción de pago.** El anticipo mata no-shows pero frena reservas: sin tarjeta a mano o con desconfianza, el cliente se va. SlotBrain ataca el mismo problema por otra vía: confirmación activa el día anterior, recordatorio 2 h antes y reprogramación fácil por chat (ver sección 4).
+3. **Precio total.** El negocio de 3 personas paga 83 USD/mes en WeiBook con IA; SlotBrain puede entrar a la mitad con lo que esa gente realmente usa.
+4. **El WhatsApp es del negocio.** El bot atiende el WhatsApp propio del cliente; el historial de conversación es suyo, no vive dentro de la plataforma.
+5. **Memoria del cliente.** Al conversar por IA, el bot sabe que "el de siempre" es el corte básico con barba con Christian y puede sugerirlo; un formulario no hace eso.
+
+**En una frase:** WeiBook convierte la reserva en una transacción (formulario + pago); SlotBrain puede convertirla en una conversación gratis. Ambos reducen no-shows por caminos opuestos: ellos cobrando antes, nosotros recordando después. Valida además la ruta ya definida en la sección 4 (plantillas aprobadas → ciclo de recordatorios) y sugiere sumar después la solicitud automática de reseñas de Google post-visita, gancho fuerte de retención.
+
+---
+
+## 6. Fuentes
 
 - cal.com/blog/best-ai-scheduling-assistant (comparativa 2026)
 - zapier.com/blog/best-ai-scheduling
@@ -96,4 +121,7 @@ Eso ES un recordatorio, pero es un **aviso de un solo toque, sin ciclo**. Lo que
 - osbook.org/guias/cuanto-cuesta-software-agenda-barberia
 - citalvo.com/es-CO/recursos/citalvo-vs-booksy-fresha-agendapro
 - bossbot.uk/blog/automatizacion-whatsapp-salon-ar
+- weibook.co/es · weibook.co/es/plans (landing oficial y precios exactos)
+- enter.co (nota jun-2024: historia y cifras) · portafolio.co (historia del fundador) · forbes.co (lista 500 Global 2023) · bloomberglinea.com (expansión a Brasil)
+- book.weibook.co/xheros-barberia (flujo real de reserva con anticipo) + documentación de la Wallet de anticipos de WeiBook
 - Código propio: `notificaciones.js`, `bot.js` (fast-path de confirmación), `docs/ROADMAP-MULTITENANT.md` Fase 3.3D y 4

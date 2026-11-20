@@ -690,6 +690,14 @@
                         <label class="lbl">Recordatorio al cliente (h antes)</label>
                         <input id="empCliHoras" type="number" value="2" min="0" max="48" class="field input-glow" style="width:100%; padding:0.65rem 0.85rem; border-radius:10px; font-size:0.8rem;">
                     </div>
+                    <div>
+                        <label class="lbl">Código de país (teléfonos del panel)</label>
+                        <input id="empCodigoPais" type="text" value="57" placeholder="57" class="field input-glow" style="width:100%; padding:0.65rem 0.85rem; border-radius:10px; font-size:0.8rem;">
+                    </div>
+                    <div>
+                        <label class="lbl">Digest matutino (HH:MM local)</label>
+                        <input id="empDigestHora" type="text" value="08:00" placeholder="08:00" class="field input-glow" style="width:100%; padding:0.65rem 0.85rem; border-radius:10px; font-size:0.8rem;">
+                    </div>
                 </div>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-top:1rem;">
                     <div>
@@ -1131,6 +1139,8 @@ function limpiarSesionLocal() {
     localStorage.removeItem('adminUser');
     localStorage.removeItem('adminRol');
     localStorage.removeItem('adminEmpresaId');
+    localStorage.removeItem('adminUserId');
+    localStorage.removeItem('adminTelefono');
 }
 
 function mostrarLogin() {
@@ -1202,6 +1212,8 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
             localStorage.setItem('adminUser', data.usuario || usuario);
             localStorage.setItem('adminRol', data.rol || 'superadmin');
             localStorage.setItem('adminEmpresaId', data.empresa_id || '');
+            localStorage.setItem('adminUserId', data.id || '');
+            localStorage.setItem('adminTelefono', data.telefono || '');
             if (data.debe_cambiar_clave) {
                 document.getElementById('loginAviso').style.display = 'block';
             }
@@ -1382,7 +1394,42 @@ function renderMiEmpresa() {
                 <p style="font-size:0.7rem; color:#4b5563; margin:0 0 4px; text-transform:uppercase; font-weight:600; letter-spacing:0.05em;">Indicaciones del bot (nicho)</p>
                 <p style="font-size:0.8rem; color:#9ca3af; margin:0;">${escHtml(emp.prompt_base.substring(0,200))}${emp.prompt_base.length > 200 ? '…' : ''}</p>
             </div>` : ''}
+        </div>
+        <div class="card fade-in" style="padding:1.5rem;">
+            <h3 style="font-size:0.95rem; font-weight:700; color:#fff; margin:0 0 6px;">Tu WhatsApp para el agente</h3>
+            <p style="font-size:0.78rem; color:#9ca3af; margin:0 0 12px;">
+                Escribe desde este número al WhatsApp del negocio para operar la agenda (modo dueño).
+                Usa código de país (ej. 573001234567). <strong style="color:#d1d5db;">No actives username de WhatsApp</strong> en este número o el agente no te reconocerá.
+            </p>
+            <div style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
+                <input id="miTelAgente" type="text" placeholder="573001234567" class="field input-glow" style="flex:1; min-width:180px; padding:0.65rem 0.85rem; border-radius:10px; font-size:0.85rem;" value="${escHtml(localStorage.getItem('adminTelefono') || '')}">
+                <button onclick="guardarMiTelefonoAgente()" class="btn-gold" style="padding:0.65rem 1.1rem; border-radius:10px; border:none; cursor:pointer; font-size:0.8rem;">
+                    Guardar número
+                </button>
+            </div>
         </div>`;
+}
+
+async function guardarMiTelefonoAgente() {
+    const userId = localStorage.getItem('adminUserId');
+    if (!userId) {
+        showToast('Sesión incompleta: vuelve a iniciar sesión', 'error');
+        return;
+    }
+    const telefono = (document.getElementById('miTelAgente')?.value || '').trim();
+    try {
+        const res = await apiFetch('PUT', `/api/admin/usuarios/${userId}`, { telefono: telefono || null });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            showToast(err.error || 'No se pudo guardar', 'error');
+            return;
+        }
+        const data = await res.json();
+        localStorage.setItem('adminTelefono', data.telefono || '');
+        showToast('Número del agente guardado');
+    } catch (e) {
+        if (e.message !== 'unauthorized') showToast('Error guardando el número', 'error');
+    }
 }
 
 async function cargarMiEmpresa() {
@@ -1616,6 +1663,8 @@ function abrirModalEmpresa() {
     document.getElementById('empColor').value = '#f59e0b';
     document.getElementById('empProfHoras').value = 24;
     document.getElementById('empCliHoras').value = 2;
+    document.getElementById('empCodigoPais').value = '57';
+    document.getElementById('empDigestHora').value = '08:00';
     document.getElementById('empLogoPreview').style.display = 'none';
     document.getElementById('empLogoFile').value = '';
     // Solo el superadmin que crea la empresa nueva puede ligar a su propietario.
@@ -1645,6 +1694,8 @@ function editarEmpresa(id) {
     const pol = emp.politicas || {};
     document.getElementById('empProfHoras').value = pol.recordatorio_profesional_horas ?? 24;
     document.getElementById('empCliHoras').value = pol.recordatorio_cliente_horas ?? 2;
+    document.getElementById('empCodigoPais').value = pol.codigo_pais || '57';
+    document.getElementById('empDigestHora').value = pol.digest_hora || '08:00';
     const t = emp.terminologia || {};
     document.getElementById('empTermServS').value = t.servicio_singular || '';
     document.getElementById('empTermServP').value = t.servicio_plural || '';
@@ -1692,9 +1743,14 @@ document.getElementById('formEmpresa').addEventListener('submit', async (e) => {
 
     const profHoras = document.getElementById('empProfHoras').value;
     const cliHoras = document.getElementById('empCliHoras').value;
+    const codigoPais = (document.getElementById('empCodigoPais').value || '57').replace(/\D/g, '') || '57';
+    let digestHora = (document.getElementById('empDigestHora').value || '08:00').trim();
+    if (!/^\d{2}:\d{2}$/.test(digestHora)) digestHora = '08:00';
     data.politicas = {
         recordatorio_profesional_horas: Number(profHoras) > 0 ? Number(profHoras) : 24,
-        recordatorio_cliente_horas: Number(cliHoras) >= 0 ? Number(cliHoras) : 2
+        recordatorio_cliente_horas: Number(cliHoras) >= 0 ? Number(cliHoras) : 2,
+        codigo_pais: codigoPais,
+        digest_hora: digestHora
     };
 
     // Solo al crear (superadmin): entregar el panel al propietario.
