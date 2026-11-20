@@ -130,46 +130,77 @@ function _partirLarga(frase) {
  * @returns {string}
  */
 function guionizarParaVoz(texto) {
-    let t = limpiarParaVoz(texto);
-    if (!t) return '';
+    if (!texto || typeof texto !== 'string') return '';
+
+    // Cada línea del mensaje es una unidad propia: los ítems de una lista
+    // (horarios, precios) quedan con pausa entre sí en vez de pegarse
+    // corridos en una sola oración sin respirar.
+    const lineas = String(texto).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    const unidades = [];
+    let items = [];
+    const cerrarLista = () => {
+        if (items.length) {
+            unidades.push(items.join(', '));
+            items = [];
+        }
+    };
+    for (const linea of lineas) {
+        const esItem = /^([-•*]|\d+[.)])\s*/.test(linea);
+        const limpia = limpiarParaVoz(linea);
+        if (!limpia) continue;
+        if (esItem) items.push(limpia);
+        else {
+            cerrarLista();
+            unidades.push(limpia);
+        }
+    }
+    cerrarLista();
+    if (!unidades.length) return '';
 
     // Símbolos que el TTS deletrea o pronuncia raro.
-    t = t
+    const preparadas = unidades.map(u => u
         .replace(/\ba\.?m\.?\b/gi, 'am')
         .replace(/\bp\.?m\.?\b/gi, 'pm')
+        .replace(/\s*\((?:hora\s+(?:de|en)\s+[^)]*)\)\s*/gi, ' ') // "(hora de America/Bogota)": dato técnico, no se lee
         .replace(/\s*[-–—]\s+/g, ', ')                        // "corte clásico - $20.000"
         .replace(/&/g, ' y ')
         .replace(/@/g, ' arroba ')
         .replace(/%/g, ' por ciento')
         .replace(/\$\s*(\d[\d.,]*\d|\d)/g, '$1 pesos')          // "$20.000" -> "20.000 pesos"
         .replace(/pesos\s+(?=[A-ZÁÉÍÓÚÑ¿¡])/g, 'pesos. ')      // lista de precios -> oraciones
+        .replace(/\b0(\d:\d{2})\b/g, '$1')                     // "09:00" -> "9:00": el cero inicial hace titubear al TTS
         // Sin dígitos en el lookahead: no mete espacios dentro de "3:00" ni "20.000".
-        .replace(/([.!?,:;])(?=[A-Za-zÁÉÍÓÚÑáéíóúñ])/g, '$1 ');
+        .replace(/([.!?,:;])(?=[A-Za-zÁÉÍÓÚÑáéíóúñ])/g, '$1 ')
+        .trim()
+    );
 
     // Protege separadores dentro de números ("20.000", "1,500", "3:00") para
     // que ningún corte de oración los rompa. Se restauran al final.
     const PUNTO = '\uE000';
     const COMA = '\uE001';
     const DOS_PUNTOS = '\uE002';
-    t = t.replace(/(\d)\.(?=\d)/g, `$1${PUNTO}`)
-         .replace(/(\d),(?=\d)/g, `$1${COMA}`)
-         .replace(/(\d):(?=\d)/g, `$1${DOS_PUNTOS}`);
 
     // "; " y ": " separan ideas -> oraciones nuevas (los de hora ya están protegidos).
     const oraciones = [];
-    for (const trozo of t.split(/\s*[;:]\s*/)) {
-        const pedazos = trozo.match(/[^.!?…]*[.!?…]+|[^.!?…]+/g) || [];
-        for (let p of pedazos) {
-            p = p.trim();
-            if (!p) continue;
-            for (let f of _partirLarga(p)) {
-                f = f.trim();
-                if (!f) continue;
-                if (!/[.!?…]$/.test(f)) f += '.';
-                // Pausa tras el saludo/confirmación inicial ("Sí, te agendo...").
-                f = _pausaInicial(f);
-                f = f.charAt(0).toUpperCase() + f.slice(1);
-                oraciones.push(f);
+    for (const trozo of preparadas) {
+        const protegido = trozo
+            .replace(/(\d)\.(?=\d)/g, `$1${PUNTO}`)
+            .replace(/(\d),(?=\d)/g, `$1${COMA}`)
+            .replace(/(\d):(?=\d)/g, `$1${DOS_PUNTOS}`);
+        for (const pedazo of protegido.split(/\s*[;:]\s*/)) {
+            const pedazos = pedazo.match(/[^.!?…]*[.!?…]+|[^.!?…]+/g) || [];
+            for (let p of pedazos) {
+                p = p.trim();
+                if (!p) continue;
+                for (let f of _partirLarga(p)) {
+                    f = f.trim();
+                    if (!f) continue;
+                    if (!/[.!?…]$/.test(f)) f += '.';
+                    // Pausa tras el saludo/confirmación inicial ("Sí, te agendo...").
+                    f = _pausaInicial(f);
+                    f = f.charAt(0).toUpperCase() + f.slice(1);
+                    oraciones.push(f);
+                }
             }
         }
     }
