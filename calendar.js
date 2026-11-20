@@ -69,7 +69,12 @@ async function agendarCita({ empresa, trabajador, servicio, fecha, hora, telefon
 
     hora = normalizarHora(hora);
 
-    if (!trabajador?.refresh_token) {
+    // Modo sin calendario (GOOGLE_CALENDAR_ON=false): no se exige refresh_token
+    // y la cita se registra solo en la base. Con calendario activado, el
+    // bloque de abajo se comporta igual que siempre.
+    const calendarOn = String(process.env.GOOGLE_CALENDAR_ON || '').trim().toLowerCase() === 'true';
+
+    if (calendarOn && !trabajador?.refresh_token) {
         return {
             exitoso: false,
             mensaje: `${nombreDeTrabajador(trabajador, empresa)} todavía no tiene un Google Calendar conectado.`
@@ -100,33 +105,35 @@ async function agendarCita({ empresa, trabajador, servicio, fecha, hora, telefon
 
     let eventoId = null;
 
-    try {
-        const calendar = crearCalendar(trabajador.refresh_token);
+    if (calendarOn) {
+        try {
+            const calendar = crearCalendar(trabajador.refresh_token);
 
-        const { data: evento } = await calendar.events.insert({
-            calendarId: 'primary',
-            resource: {
-                summary: resumen,
-                description: descripcion,
-                location: empresa?.direccion || undefined,
-                start: { dateTime: inicio.toISOString(), timeZone: zona },
-                end: { dateTime: fin.toISOString(), timeZone: zona },
-                reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 60 }] }
+            const { data: evento } = await calendar.events.insert({
+                calendarId: 'primary',
+                resource: {
+                    summary: resumen,
+                    description: descripcion,
+                    location: empresa?.direccion || undefined,
+                    start: { dateTime: inicio.toISOString(), timeZone: zona },
+                    end: { dateTime: fin.toISOString(), timeZone: zona },
+                    reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 60 }] }
+                }
+            });
+
+            eventoId = evento?.id;
+            console.log(`✅ Cita creada en el calendario de ${nombreDeTrabajador(trabajador, empresa)}: ${eventoId}`);
+        } catch (error) {
+            console.error('❌ Error creando el evento en Google Calendar:', error.message);
+
+            if (error.code === 401 || error.code === 403 || error.code === 400) {
+                return {
+                    exitoso: false,
+                    mensaje: `La conexión con el calendario de ${nombreDeTrabajador(trabajador, empresa)} expiró o fue revocada. Hay que volver a enlazarla desde el panel.`
+                };
             }
-        });
-
-        eventoId = evento?.id;
-        console.log(`✅ Cita creada en el calendario de ${nombreDeTrabajador(trabajador, empresa)}: ${eventoId}`);
-    } catch (error) {
-        console.error('❌ Error creando el evento en Google Calendar:', error.message);
-
-        if (error.code === 401 || error.code === 403 || error.code === 400) {
-            return {
-                exitoso: false,
-                mensaje: `La conexión con el calendario de ${nombreDeTrabajador(trabajador, empresa)} expiró o fue revocada. Hay que volver a enlazarla desde el panel.`
-            };
+            return { exitoso: false, mensaje: 'Hubo un problema técnico al escribir en la agenda.' };
         }
-        return { exitoso: false, mensaje: 'Hubo un problema técnico al escribir en la agenda.' };
     }
 
     // El evento ya existe: si falla el INSERT en Supabase lo registramos igual
@@ -219,7 +226,10 @@ async function citaVigente({ empresa, telefonoCliente, bsuid = null }) {
 }
 
 async function borrarEventoGoogle(trabajador, eventoGoogleId) {
-    if (!eventoGoogleId || !trabajador?.refresh_token) return false;
+    // Sin evento asociado no hay nada que borrar: la cancelación en la base
+    // es válida igual (citas guardadas sin calendario o registro huérfano).
+    if (!eventoGoogleId) return true;
+    if (!trabajador?.refresh_token) return false;
 
     try {
         const calendar = crearCalendar(trabajador.refresh_token);

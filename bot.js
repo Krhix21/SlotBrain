@@ -149,14 +149,18 @@ function parseArgsBrutos(brutos) {
 // Tools para Groq
 // ============================================================
 
+const calendarOnParaBot = String(process.env.GOOGLE_CALENDAR_ON || '').trim().toLowerCase() === 'true';
+
 const verSlotsTool = {
     type: 'function',
     function: {
         name: 'ver_slots',
         description:
             'Muestra los horarios realmente libres para un servicio en una fecha. ' +
-            'Úsala SIEMPRE antes de agendar: devuelve la lista de horas que el sistema ' +
-            'calculó contra el Google Calendar de cada profesional. ' +
+            'Úsala SIEMPRE antes de agendar: devuelve la lista de horas disponibles ' +
+            (calendarOnParaBot
+                ? 'según el Google Calendar de cada profesional. '
+                : 'según el horario de atención del negocio. ') +
             'Después de llamarla, NO agendes nada por tu cuenta: ofrece los horarios y espera la confirmación del cliente.',
         parameters: {
             type: 'object',
@@ -529,7 +533,13 @@ async function procesarToolCall({ nombre, argsCrudos, config, bot, conv, telefon
             });
         }
 
-        return resultado.mensaje;
+        // Si el motivo es un detalle técnico (calendarios, tokens, base de
+        // datos), el cliente no debe enterarse: se traduce a algo natural.
+        const motivo = String(resultado.mensaje || '');
+        const esTecnico = /calendar|calendario|token|panel|base de datos/i.test(motivo);
+        return esTecnico
+            ? 'Ahora mismo no tengo horarios disponibles para esa fecha. ¿Quieres que mire otro día?'
+            : motivo || 'No encontré horarios disponibles para esa fecha.';
     }
 
     if (nombre === 'agendar_cita') {

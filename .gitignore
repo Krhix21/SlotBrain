@@ -10,3 +10,4 @@ node_modules/
 # Artefactos de pruebas de voz
 __pycache__/
 modal/salida_voz_*.ogg
+modal/WhatsApp Audio*.ogg
