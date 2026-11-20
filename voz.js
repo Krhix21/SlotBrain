@@ -30,6 +30,26 @@ const GROQ_MODEL = 'whisper-large-v3-turbo';
 const LIMITE_OGG_BYTES = 512 * 1024;
 
 /**
+ * Prepara un texto del bot para que el TTS lo lea natural.
+ * El cerebro responde con formato de WhatsApp (asteriscos de negrita,
+ * emojis, viñetas) y todo eso lo pronuncia mal o le cambia la entonación.
+ * No toca números ni fechas: "a las 3:00 pm" se lee bien tal cual.
+ * @param {string} texto
+ * @returns {string}
+ */
+function limpiarParaVoz(texto) {
+    if (!texto || typeof texto !== 'string') return '';
+    return texto
+        .replace(/[*_~`]+/g, '')            // markdown de WhatsApp (negrita, cursiva, tachado, código)
+        .replace(/https?:\/\/\S+/g, '')      // URLs: el TTS las deletrea
+        .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, '') // emojis y símbolos
+        .replace(/^[ \t]*[-•\d]+[.)]?[ \t]+/gm, '') // viñetas y numeraciones
+        .replace(/\s*\n+\s*/g, ' ')          // saltos de línea -> pausas suaves
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+}
+
+/**
  * Transcribe un audio (ogg de WhatsApp) a texto con Groq Whisper.
  * @param {Buffer} buffer
  * @param {string|null} mimeType - mime de Meta (audio/ogg; codecs=opus, etc.)
@@ -121,7 +141,7 @@ async function sintetizar(texto) {
  * @returns {Promise<boolean>}
  */
 async function responderPorVoz(numeroDestino, texto, phoneNumberId) {
-    const ogg = await sintetizar(texto);
+    const ogg = await sintetizar(limpiarParaVoz(texto));
     if (!ogg) return false;
     return whatsappCloud.enviarNotaVoz(numeroDestino, ogg, phoneNumberId);
 }
@@ -129,5 +149,6 @@ async function responderPorVoz(numeroDestino, texto, phoneNumberId) {
 module.exports = {
     transcribir,
     sintetizar,
-    responderPorVoz
+    responderPorVoz,
+    limpiarParaVoz
 };

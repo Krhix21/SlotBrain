@@ -31,6 +31,21 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
 
 const MAX_SLOTS_POR_TRABAJADOR = 24;
 
+// ----------------------------------------------------------------
+// Interruptor de Google Calendar.
+//
+// GOOGLE_CALENDAR_ON=false (o sin definir) = MODO SIN CALENDARIO:
+//   - Se consideran TODOS los profesionales activos, no solo los que
+//     tienen Calendar enlazado.
+//   - La disponibilidad se calcula con el horario configurado menos
+//     las citas confirmadas en la base y los bloqueos del panel
+//     (en vez del freebusy de Google).
+//   - Las citas se registran en `citas` sin evento de Google.
+// El código de Calendar queda intacto: basta con poner la variable
+// en true y redesplegar para volver al modo con calendario.
+// ----------------------------------------------------------------
+const CALENDAR_ON = String(process.env.GOOGLE_CALENDAR_ON || '').trim().toLowerCase() === 'true';
+
 /** Trabajadores de una empresa que tienen calendario realmente enlazado. */
 async function obtenerTrabajadores(empresaId, soloConCalendar = true) {
     let consulta = supabase
@@ -48,7 +63,8 @@ async function obtenerTrabajadores(empresaId, soloConCalendar = true) {
     }
 
     const trabajadores = data || [];
-    return soloConCalendar
+    const exigirCalendar = CALENDAR_ON && soloConCalendar;
+    return exigirCalendar
         ? trabajadores.filter(t => t.refresh_token && t.correo)
         : trabajadores;
 }
@@ -154,6 +170,44 @@ function sumarDia(fechaISO) {
     return f.toISOString().slice(0, 10);
 }
 
+/**
+ * Bloques ocupados de un trabajador según el modo:
+ *   - Con calendario: freebusy de su Google Calendar.
+ *   - Sin calendario: las citas confirmadas en la base (`citas`), que
+ *     ocupan igual que un evento. Así no hay doble reserva aunque
+ *     Google no participe.
+ */
+async function ocupadoDeTrabajador(trabajador, desdeIso, hastaIso, zona) {
+    if (CALENDAR_ON) {
+        return consultarOcupado(trabajador, desdeIso, hastaIso, zona);
+    }
+
+    const { data, error } = await supabase
+        .from('citas')
+        .select('inicio_utc, duracion_minutos')
+        .eq('trabajador_id', trabajador.id)
+        .eq('estado', 'confirmada')
+        .gte('inicio_utc', desdeIso)
+        .lt('inicio_utc', hastaIso);
+
+    if (error) {
+        console.error('Error consultando citas para disponibilidad:', error.message);
+        // Estado desconocido: mejor bloquear que prometer horas que no verificamos.
+        return { bloques: [], inaccesible: true };
+    }
+
+    return {
+        bloques: (data || []).map(c => {
+            const inicio = new Date(c.inicio_utc).getTime();
+            return {
+                inicio,
+                fin: inicio + (c.duracion_minutos || 60) * 60 * 1000
+            };
+        }),
+        inaccesible: false
+    };
+}
+
 /** Bloques ocupados del calendario de un trabajador, en ms. */
 async function consultarOcupado(trabajador, desdeIso, hastaIso, zona) {
     try {
@@ -232,7 +286,7 @@ async function slotsDeTrabajador({ trabajador, empresa, fecha, duracionMinutos, 
     const ahora = Date.now();
 
     const [ocupado, bloqueos] = await Promise.all([
-        consultarOcupado(
+        ocupadoDeTrabajador(
             trabajador,
             zonedToUtc(fecha, '00:00', zona).toISOString(),
             zonedToUtc(fecha, '23:59', zona).toISOString(),
@@ -303,8 +357,12 @@ async function obtenerSlots({ empresa, servicios = [], fecha, duracionMinutos = 
             slots: [],
             trabajadores: [],
             motivo: trabajadorId
-                ? 'Ese profesional todavía no tiene un Google Calendar conectado.'
-                : 'Ningún profesional tiene un Google Calendar conectado.'
+                ? (CALENDAR_ON
+                    ? 'Ese profesional todavía no tiene un Google Calendar conectado.'
+                    : 'Ese profesional no está disponible.')
+                : (CALENDAR_ON
+                    ? 'Ningún profesional tiene un Google Calendar conectado.'
+                    : 'No hay profesionales activos en este negocio.')
         };
     }
 
@@ -394,7 +452,7 @@ async function confirmarSlot({ empresa, trabajador, fecha, hora, duracionMinutos
     }
 
     const [ocupado, bloqueos] = await Promise.all([
-        consultarOcupado(
+        ocupadoDeTrabajador(
             trabajador,
             new Date(inicioMs).toISOString(),
             new Date(finMs).toISOString(),
@@ -404,7 +462,10 @@ async function confirmarSlot({ empresa, trabajador, fecha, hora, duracionMinutos
     ]);
 
     if (ocupado.inaccesible) {
-        return { libre: false, motivo: 'no pude verificar el calendario' };
+        return {
+            libre: false,
+            motivo: CALENDAR_ON ? 'no pude verificar el calendario' : 'no pude verificar la agenda'
+        };
     }
 
     const bloqueados = intervalosDeBloqueo(bloqueos, fecha, zona);

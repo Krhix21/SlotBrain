@@ -321,7 +321,7 @@ async function enviarMensajeVoz(numeroDestino, mediaId, phoneNumberId) {
                 messaging_product: 'whatsapp',
                 to: numeroDestino,
                 type: 'audio',
-                audio: { id: mediaId }
+                audio: { id: mediaId, voice: true }
             })
         });
 
