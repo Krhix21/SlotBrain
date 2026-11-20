@@ -1640,18 +1640,32 @@ async function guardarVozAjustes() {
     }
 }
 
+async function _llamarProbarVoz() {
+    // Una sola llamada al backend. El backend tiene timeout propio de 3 min
+    // contra Modal, asi que esta llamada nunca queda colgada indefinido.
+    const res = await apiFetch('POST', `/api/admin/voz/${vozEmpresaId}/probar`, {});
+    if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e.error || ('Error HTTP ' + res.status));
+    }
+    return res.blob();
+}
+
 async function probarVozPanel() {
     const btn = document.getElementById('btnProbarVoz');
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right:5px;"></i>Generando…'; }
     estadoVozPanel('Generando la frase con tu voz (puede tardar un rato la primera vez)…');
     try {
-        const res = await apiFetch('POST', `/api/admin/voz/${vozEmpresaId}/probar`, {});
-        if (!res.ok) {
-            const e = await res.json().catch(() => ({}));
-            estadoVozPanel(e.error || ('Error HTTP ' + res.status), true);
-            return;
+        // Reintento automatico: si la primera falla (contenedor frio,
+        // arranque en caliente de Modal), el segundo casi siempre sale bien.
+        let blob;
+        try {
+            blob = await _llamarProbarVoz();
+        } catch (e1) {
+            if (e1.message === 'unauthorized') throw e1;
+            estadoVozPanel('Primer intento falló (' + e1.message + '). Reintentando…', true);
+            blob = await _llamarProbarVoz();
         }
-        const blob = await res.blob();
         new Audio(URL.createObjectURL(blob)).play();
         estadoVozPanel('Esa es tu voz tal como la escucharán los clientes.');
     } catch (e) {
