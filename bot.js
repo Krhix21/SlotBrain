@@ -744,6 +744,10 @@ async function procesarMensajeWhatsapp({ telefonoBot, phoneNumberId, telefonoCli
     if (uid) conv.bsuid = uid;
     if (tel) conv.telefonoCliente = tel;
 
+    // Resuelto dentro del try, pero `enviar` lo necesita (voz por empresa):
+    // por eso vive aquí arriba y no como const del try.
+    let empresaId = null;
+
     const enviar = async (respuesta) => {
         const limpio = limpiarTexto(respuesta);
         if (!limpio) return;
@@ -753,7 +757,7 @@ async function procesarMensajeWhatsapp({ telefonoBot, phoneNumberId, telefonoCli
         // el cliente nunca se queda sin respuesta.
         let enviadoPorVoz = false;
         if (porVoz) {
-            enviadoPorVoz = await voz.responderPorVoz(destinoEnvio, limpio, phoneNumberId);
+            enviadoPorVoz = await voz.responderPorVoz(destinoEnvio, limpio, phoneNumberId, empresaId);
             if (!enviadoPorVoz) console.warn('⚠️  Respuesta por voz no salió, se envía como texto.');
         }
         if (!enviadoPorVoz) {
@@ -767,7 +771,7 @@ async function procesarMensajeWhatsapp({ telefonoBot, phoneNumberId, telefonoCli
     try {
         if (messageId) marcarComoLeido(messageId, phoneNumberId).catch(() => {});
 
-        const empresaId = await resolverEmpresaId(telefonoBot, phoneNumberId);
+        empresaId = await resolverEmpresaId(telefonoBot, phoneNumberId);
         if (!empresaId) {
             console.error(`❌ El número ${telefonoBot} no está registrado en numeros_bot. Mensaje ignorado.`);
             return;

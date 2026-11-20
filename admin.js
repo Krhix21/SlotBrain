@@ -6,6 +6,7 @@ const roles = require('./roles');
 const { firmarLink } = require('./auth');
 const { zonedToUtc } = require('./tiempo');
 const tokensMeta = require('./tokensMeta');
+const voz = require('./voz');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
@@ -1675,6 +1676,217 @@ async function deletePlantilla(req, res) {
 }
 
 // ============================================
+// Voz del bot (una por empresa, bucket privado `voces`)
+//
+// El dueño graba o sube el sample desde el panel; el backend lo guarda
+// en Storage, lo transcribe con Groq Whisper (Qwen3-TTS exige la
+// transcripción EXACTA para clonar) y deja la fila activa en `voces`.
+// El bot lee esa voz al responder notas de voz.
+// ============================================
+const BUCKET_VOCES = 'voces';
+const TAMANO_MAX_AUDIO = 5 * 1024 * 1024; // 5 MB: ~30 s de m4a/ogg sobran
+
+// mime del dataURL -> extensión del archivo en Storage.
+const EXT_AUDIO = {
+    'audio/mpeg': 'mp3', 'audio/mp3': 'mp3',
+    'audio/mp4': 'm4a', 'audio/x-m4a': 'm4a', 'audio/m4a': 'm4a',
+    'audio/ogg': 'ogg', 'application/ogg': 'ogg', 'audio/opus': 'ogg',
+    'audio/webm': 'webm',
+    'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/vnd.wave': 'wav',
+    'audio/aac': 'aac'
+};
+
+function vozVisible(fila) {
+    if (!fila) return null;
+    return {
+        id: fila.id,
+        activa: fila.activa,
+        mime_type: fila.mime_type,
+        tamano_bytes: fila.tamano_bytes,
+        ref_text: fila.ref_text,
+        estilo: fila.estilo,
+        creado_en: fila.creado_en
+    };
+}
+
+async function getVoz(req, res) {
+    try {
+        if (!(await puedeOperarEmpresa(req, res, req.params.empresa_id))) return;
+
+        const { data, error } = await supabase
+            .from('voces')
+            .select('id, activa, mime_type, tamano_bytes, ref_text, estilo, creado_en')
+            .eq('empresa_id', req.params.empresa_id)
+            .eq('activa', true)
+            .maybeSingle();
+
+        if (error) throw error;
+        res.json({ voz: vozVisible(data) });
+    } catch (error) {
+        servidorError(res, 'Error obteniendo la voz', error);
+    }
+}
+
+/** POST /api/admin/voz/:empresa_id { data_url, ref_text?, estilo? } */
+async function subirVoz(req, res) {
+    try {
+        if (!(await puedeOperarEmpresa(req, res, req.params.empresa_id))) return;
+
+        const { data_url, ref_text, estilo } = req.body || {};
+        const m = /^data:([a-z0-9.+-]+\/[a-z0-9.+-]+);base64,([a-z0-9+/=]+)$/i.exec(data_url || '');
+        if (!m) return fallo(res, 'Debe enviarse un audio (data_url)');
+        const mime = m[1].toLowerCase();
+        const ext = EXT_AUDIO[mime];
+        if (!ext) return fallo(res, 'Formato de audio no soportado (usa m4a, ogg, mp3, wav o webm)');
+
+        const buffer = Buffer.from(m[2], 'base64');
+        if (buffer.length < 1024) return fallo(res, 'El audio está vacío o llegó incompleto');
+        if (buffer.length > TAMANO_MAX_AUDIO) return fallo(res, 'El audio es demasiado grande (máximo 5 MB)');
+
+        // Qwen3-TTS clona con la transcripción EXACTA del sample: si el dueño
+        // no la escribe, la sacamos con Whisper. Si falla la transcripción,
+        // no inventamos: se pide el texto a mano.
+        let refText = typeof ref_text === 'string' ? ref_text.trim().slice(0, 2000) : '';
+        if (!refText) {
+            refText = await voz.transcribir(buffer, mime);
+            if (!refText) {
+                return fallo(res, 'No pude transcribir el audio automáticamente. Escribe en el campo de texto EXACTAMENTE lo que dice la grabación y vuelve a guardar.');
+            }
+        }
+
+        const estiloFinal = typeof estilo === 'string' ? estilo.trim().slice(0, 300) : null;
+        const ruta = `${req.params.empresa_id}/voz.${ext}`;
+
+        const { error: errUp } = await supabase.storage
+            .from(BUCKET_VOCES)
+            .upload(ruta, buffer, { contentType: mime, upsert: true });
+        if (errUp) {
+            console.warn('⚠️ storage voz:', errUp.message);
+            return res.status(503).json({ error: 'Bucket de voces no disponible' });
+        }
+        // Si el sample anterior quedó con otra extensión, no dejar huérfanos.
+        for (const e of ['m4a', 'ogg', 'mp3', 'wav', 'webm', 'aac']) {
+            if (e !== ext) {
+                await supabase.storage.from(BUCKET_VOCES)
+                    .remove([`${req.params.empresa_id}/voz.${e}`]).catch(() => {});
+            }
+        }
+
+        // Una voz activa por empresa: las anteriores quedan desactivadas
+        // (historial) y esta manda.
+        await supabase.from('voces').update({ activa: false }).eq('empresa_id', req.params.empresa_id);
+
+        const { data, error } = await supabase
+            .from('voces')
+            .insert({
+                empresa_id: req.params.empresa_id,
+                activa: true,
+                storage_path: ruta,
+                mime_type: mime,
+                tamano_bytes: buffer.length,
+                ref_text: refText,
+                estilo: estiloFinal
+            })
+            .select('id, activa, mime_type, tamano_bytes, ref_text, estilo, creado_en')
+            .single();
+
+        if (error) throw error;
+
+        voz.limpiarCacheVoces();
+        res.status(201).json({ voz: vozVisible(data) });
+    } catch (error) {
+        servidorError(res, 'Error subiendo la voz', error);
+    }
+}
+
+/** PUT /api/admin/voz/:empresa_id { ref_text?, estilo? }: afina la voz activa. */
+async function updateVoz(req, res) {
+    try {
+        if (!(await puedeOperarEmpresa(req, res, req.params.empresa_id))) return;
+
+        const updates = soloCampos(req.body, ['ref_text', 'estilo']);
+        if (Object.keys(updates).length === 0) {
+            return fallo(res, 'No enviaste ningún campo editable');
+        }
+        if (updates.ref_text !== undefined) {
+            updates.ref_text = String(updates.ref_text || '').trim().slice(0, 2000);
+            if (!updates.ref_text) return fallo(res, 'La transcripción no puede quedar vacía');
+        }
+        if (updates.estilo !== undefined) {
+            updates.estilo = updates.estilo === null ? null : String(updates.estilo).trim().slice(0, 300) || null;
+        }
+
+        const { data, error } = await supabase
+            .from('voces')
+            .update({ ...updates, actualizado_en: new Date().toISOString() })
+            .eq('empresa_id', req.params.empresa_id)
+            .eq('activa', true)
+            .select('id, activa, mime_type, tamano_bytes, ref_text, estilo, creado_en')
+            .single();
+
+        if (error) throw error;
+        if (!data) return fallo(res, 'Esta empresa todavía no tiene una voz registrada', 404);
+
+        voz.limpiarCacheVoces();
+        res.json({ voz: vozVisible(data) });
+    } catch (error) {
+        servidorError(res, 'Error actualizando la voz', error);
+    }
+}
+
+/**
+ * POST /api/admin/voz/:empresa_id/probar { texto? }
+ * Genera una frase con la voz activa y devuelve el ogg para escucharlo
+ * en el panel ANTES de empezar a usarla con clientes.
+ */
+async function probarVoz(req, res) {
+    try {
+        if (!(await puedeOperarEmpresa(req, res, req.params.empresa_id))) return;
+
+        const vozEmpresa = await voz.obtenerVozEmpresa(req.params.empresa_id);
+        if (!vozEmpresa) {
+            return fallo(res, 'Esta empresa todavía no tiene una voz registrada', 404);
+        }
+        if (!process.env.MODAL_VOICE_URL?.trim()) {
+            return res.status(503).json({ error: 'El servidor no tiene MODAL_VOICE_URL configurado' });
+        }
+
+        const frase = typeof req.body?.texto === 'string' && req.body.texto.trim()
+            ? req.body.texto.trim().slice(0, 500)
+            : 'Hola, claro que sí. ¿Para cuándo te agendo la cita?';
+
+        const ogg = await voz.sintetizar(voz.guionizarParaVoz(frase), vozEmpresa);
+        if (!ogg) return res.status(502).json({ error: 'El endpoint de voz no respondió; revisa MODAL_VOICE_URL e inténtalo de nuevo' });
+
+        res.setHeader('Content-Type', 'audio/ogg');
+        res.setHeader('Cache-Control', 'no-store');
+        res.send(ogg);
+    } catch (error) {
+        servidorError(res, 'Error probando la voz', error);
+    }
+}
+
+async function deleteVoz(req, res) {
+    try {
+        if (!(await puedeOperarEmpresa(req, res, req.params.empresa_id))) return;
+
+        // Borrar filas y archivos de todas las extensiones posibles.
+        const { error } = await supabase.from('voces').delete().eq('empresa_id', req.params.empresa_id);
+        if (error) throw error;
+
+        for (const e of ['m4a', 'ogg', 'mp3', 'wav', 'webm', 'aac']) {
+            await supabase.storage.from(BUCKET_VOCES)
+                .remove([`${req.params.empresa_id}/voz.${e}`]).catch(() => {});
+        }
+
+        voz.limpiarCacheVoces();
+        res.json({ ok: true });
+    } catch (error) {
+        servidorError(res, 'Error eliminando la voz', error);
+    }
+}
+
+// ============================================
 // Citas
 // ============================================
 
@@ -1851,6 +2063,13 @@ function setupAdminRoutes(app) {
     app.post('/api/admin/plantillas/:empresa_id', requireAuth, createPlantilla);
     app.put('/api/admin/plantillas/:id', requireAuth, updatePlantilla);
     app.delete('/api/admin/plantillas/:id', requireAuth, deletePlantilla);
+
+    // Voz del bot (una por empresa; sample del dueño o de quien él elija)
+    app.get('/api/admin/voz/:empresa_id', requireAuth, getVoz);
+    app.post('/api/admin/voz/:empresa_id', requireAuth, subirVoz);
+    app.put('/api/admin/voz/:empresa_id', requireAuth, updateVoz);
+    app.post('/api/admin/voz/:empresa_id/probar', requireAuth, probarVoz);
+    app.delete('/api/admin/voz/:empresa_id', requireAuth, deleteVoz);
 }
 
 // Limpieza de sesiones vencidas en la base. La preparación del primer
