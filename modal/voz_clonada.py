@@ -40,6 +40,15 @@ FRASES_PRUEBA = [
     "Hola, claro que sí. ¿Para cuándo te agendo la cita?",
 ]
 
+# Cache de pesos en un Volume: los modelos se descargan UNA VEZ y quedan
+# montados en /model-cache. Sin esto cada arranque frio re-descarga
+# ("Fetching 4 files", ~30 s de GPU extra por contenedor nuevo).
+# IMPORTANTE: HF_HOME NO va en la imagen (.env). Si la imagen referencia la
+# ruta de montaje, el Volume no puede montarse ("cannot mount volume on
+# non-empty path"). Se fija en runtime dentro del contenedor (ver
+# _cargar_modelo).
+_cache = modal.Volume.from_name("qwen3-tts-cache", create_if_missing=True)
+
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("ffmpeg")
@@ -51,10 +60,25 @@ image = (
 
 app = modal.App("voz-clonada", image=image)
 
+
+def _persistir_cache():
+    """Guarda en el Volume lo descargado (por si el contenedor muere de golpe
+    antes del auto-commit; si falla no rompe la llamada)."""
+    try:
+        _cache.commit()
+    except Exception:
+        pass
+
 # ---------------------------------------------------------------- carga del modelo
 
 
 def _cargar_modelo():
+    # Cache de pesos en el Volume montado (/model-cache). DEBE fijarse ANTES
+    # de importar torch/huggingface: si se pone como .env de la imagen, el
+    # Volume no monta ("cannot mount volume on non-empty path").
+    os.environ["HF_HOME"] = "/model-cache/hf"
+    os.environ["XDG_CACHE_HOME"] = "/model-cache/xdg"
+
     import torch
     from qwen_tts import Qwen3TTSModel
 
@@ -105,7 +129,12 @@ def _sintetizar(model, ref_wav_path: str, ref_text: str, texto: str) -> bytes:
 # dentro de la imagen, asi cambiar la grabacion no requiere recompilar nada.
 
 
-@app.cls(gpu="T4", timeout=900, scaledown_window=300)
+@app.cls(
+    gpu="T4",
+    timeout=300,  # colgadas matadas a los 5 min (antes 15): 0,05 USD en vez de 0,15
+    scaledown_window=300,
+    volumes={"/model-cache": _cache},
+)
 class VozClonada:
     @modal.enter()
     def cargar(self):
@@ -181,7 +210,12 @@ def _prompt_para(model, ref_wav: str, ref_text: str, clave: str):
 # scaledown_window=600: el contenedor queda caliente 10 minutos tras la
 # ultima frase. Si el cliente sigue conversando, no vuelve a pagar el
 # arranque frio (1-2 min). Si nadie escribe, se apaga y no cuesta nada.
-@app.function(gpu="T4", timeout=900, scaledown_window=600)
+@app.function(
+    gpu="T4",
+    timeout=300,  # colgadas matadas a los 5 min (antes 15): 0,05 USD en vez de 0,15
+    scaledown_window=600,
+    volumes={"/model-cache": _cache},
+)
 @modal.fastapi_endpoint(method="POST")
 def api(body: dict):
     """POST {"texto": "...", "ref_audio_b64": "...", "ref_text": "..."} -> ogg.
@@ -194,6 +228,7 @@ def api(body: dict):
     global _modelo_endpoint
     if _modelo_endpoint is None:
         _modelo_endpoint = _cargar_modelo()
+        _persistir_cache()
 
     texto = body["texto"]
     # "estilo" llega desde el panel (tabla voces) pero el modelo de

@@ -361,10 +361,14 @@ async function sintetizar(texto, voz = null) {
             if (voz.estilo) body.estilo = voz.estilo;
         }
 
+        // 3 minutos: de sobra para un arranque frio completo (descarga con
+        // Volume cache + carga + generacion < 90 s). Antes no habia timeout y
+        // una llamada colgada dejaba al panel/bot esperando indefinido.
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(180_000)
         });
 
         if (!response.ok) {
