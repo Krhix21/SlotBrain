@@ -177,7 +177,9 @@ async function destinoDueno(empresaId) {
         .not('bsuid', 'is', null)
         .limit(1);
 
-    return (conBsuid && (conBsuid[0].telefono || conBsuid[0].bsuid)) || null;
+    // El propietario puede existir sin teléfono y sin bsuid: conBsuid llega
+    // como [] y conBsuid[0] sería undefined (crasheaba leyendo .telefono).
+    return (conBsuid && conBsuid[0] && (conBsuid[0].telefono || conBsuid[0].bsuid)) || null;
 }
 
 /**

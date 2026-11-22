@@ -280,7 +280,12 @@ async function slotsDeTrabajador({ trabajador, empresa, fecha, duracionMinutos, 
     const zona = empresa.zona_horaria || ZONA_POR_DEFECTO;
     const ventanas = ventanasDelDia(trabajador, empresa, fecha);
 
-    if (ventanas.length === 0) return [];
+    // Día sin horario (ej. domingos cerrados): mismo formato que el resto
+    // de las salidas. Devolver un array pelado aquí rompía a obtenerSlots
+    // ("Cannot read properties of undefined (reading 'length')") y el
+    // cliente recibía "problemas técnicos" cada vez que preguntaba por un
+    // día cerrado. `sinHorario` deja distinguir cerrado de lleno.
+    if (ventanas.length === 0) return { slots: [], inaccesible: false, sinHorario: true };
 
     const paso = pasoDeSlots(trabajador, empresa);
     const ahora = Date.now();
@@ -405,9 +410,16 @@ async function obtenerSlots({ empresa, servicios = [], fecha, duracionMinutos = 
     // no son lo mismo: sin este motivo el bot responde "no hay horas libres"
     // y el problema real (el token vencido) solo aparece en el log.
     const inaccesibles = resultados.filter(r => r.inaccesible);
+
+    // Día cerrado (nadie tiene horario ese día) ≠ día lleno: como recepcionista,
+    // se dice "ese día no atendemos", no "se llenó".
+    const todosSinHorario = resultados.length > 0 && resultados.every(r => r.sinHorario);
+
     const motivo = (slots.length === 0 && inaccesibles.length > 0)
         ? `No pude leer el calendario de ${inaccesibles.map(r => r.trabajador.nombre || 'el profesional').join(', ')}.`
-        : null;
+        : (slots.length === 0 && todosSinHorario)
+            ? 'Ese día no atendemos. ¿Te ofrezco otro día?'
+            : null;
 
     return { slots, trabajadores, motivo };
 }

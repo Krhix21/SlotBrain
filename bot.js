@@ -102,13 +102,36 @@ function terminologiaDe(empresa) {
 // Utilidades de texto
 // ============================================================
 
+// Ojo con el acento: en JS, \b tras "í" NO funciona (í no es carácter de
+// palabra), así que "sí" con tilde nunca matcheaba. Se usa (?![a-z0-9]).
 function esConfirmacionAfirmativa(texto) {
-    return /^(s[ií]|si|claro|adelante|dale|ok|okey|correcto|exacto|confirmo|confirmar|sip|de una|listo|vamos)\b[\s.!?]*$/i
+    return /^(s[ií]|si|claro|adelante|dale|ok|okey|correcto|exacto|confirmo|confirmar|sip|de una|listo|vamos)(?![a-z0-9])[\s.!?]*$/i
         .test(String(texto || '').trim());
 }
 
 function esNegacion(texto) {
-    return /^(no|nop|nel|mejor no|ahora no|dejemos|otro d[ií]a|otra fecha|mejor otro)\b[\s.!?]*$/i
+    return /^(no|nop|nel|mejor no|ahora no|dejemos|otro d[ií]a|otra fecha|mejor otro)(?![a-z0-9])[\s.!?]*$/i
+        .test(String(texto || '').trim());
+}
+
+/** El mensaje es apenas un saludo, sin ninguna petición ("hola", "buenas?"). */
+function mensajeEsSoloSaludo(texto) {
+    return /^(h[oó]l+a+|holi|hey|buenas?|buenos\s+d[ií]as|buenas\s+tardes|buenas\s+noches|qu[eé]\s+tal)[!¡.?\s]*$/i
+        .test(String(texto || '').trim());
+}
+
+/** El mensaje solo dice el nombre (responde a "¿cómo te llamas?"). */
+function mensajeEsSoloNombre(texto) {
+    const t = String(texto || '').trim();
+    if (!t || t.length > 40) return false;
+    if (/^(soy|me llamo|mi nombre es)\s+[\wáéíóúñ\s]+[.!?]*$/i.test(t)) return true;
+    // Palabra suelta: solo pasa aquí si extraerNombre ya validó que es un nombre.
+    return /^[\wáéíóúñ\s]+[.!?]*$/i.test(t);
+}
+
+/** Aceptación de la oferta sin elegir hora ("sí, la primera", "cualquiera me sirve"). */
+function aceptaLaPrimeraOferta(texto) {
+    return /^(¡|s[ií]|si)(?![a-z0-9])[,\s¡!]*(la\s+|el\s+)?(primera|primero|cualquiera|que\s+sea|la\s+que\s+sea|cualquier)/i
         .test(String(texto || '').trim());
 }
 
@@ -266,7 +289,17 @@ async function ejecutarVerSlots({ config, args }) {
     });
 
     if (slots.length === 0) {
-        return { exitoso: true, slots: [], sinHoras: true, mensaje: motivo || 'No hay horas libres ese día.' };
+        // "Ese día" confunde cuando el cliente nunca mencionó una fecha:
+        // se dice para qué día es (hoy, mañana o la fecha corta).
+        const zona = config.empresa.zona_horaria || 'America/Bogota';
+        const hoy = hoyEnZona(zona);
+        const manana = sumarDias(hoy, 1);
+        const relativo = fecha === hoy
+            ? 'Para hoy'
+            : fecha === manana
+                ? 'Para mañana'
+                : `Para el ${formatearFechaCorta(fecha)}`;
+        return { exitoso: true, slots: [], sinHoras: true, mensaje: motivo || `${relativo} ya no nos quedan horas. ¿Te ofrezco otro día?` };
     }
 
     return {
@@ -282,7 +315,23 @@ async function ejecutarAgendar({ config, bot, args, conv, telefonoCliente, userN
     const pendiente = leerPending(conv);
 
     if (!pendiente) {
-        return { exitoso: false, mensaje: 'Primero debes ofrecerle los horarios al cliente con ver_slots.' };
+        // Esta cadena la ve el CLIENTE tal cual (el resultado de la tool es la
+        // respuesta final). Antes decía "Primero debes ofrecerle los horarios
+        // con ver_slots": jerga interna con nombre de herramienta.
+        // Si el modelo manda agendar cuando ya hay cita vigente (pasa en
+        // despedidas tras confirmar), se responde con contexto y no con error.
+        const citaVigente = await calendar.citaVigente({
+            empresa: config.empresa,
+            telefonoCliente,
+            bsuid: conv?.bsuid || null
+        });
+        if (citaVigente) {
+            return {
+                exitoso: false,
+                mensaje: `Tranquilo: tu cita del ${formatearFechaCorta(citaVigente.fecha)} a las ${citaVigente.hora} ya quedó agendada.`
+            };
+        }
+        return { exitoso: false, mensaje: 'Déjame revisar la agenda: ¿para qué día y hora la necesitas?' };
     }
 
     const servicio = servicioPorNombre(config.servicios, pendiente.servicio);
@@ -474,17 +523,22 @@ function guardarPending(conv, { empresaId, servicio, fecha, hora, trabajadorId, 
 }
 
 function formatearOfertaSlots({ empresa, slots, trabajadores, servicio, fecha }) {
-    const zona = empresa.zona_horaria || 'America/Bogota';
     const multiProfesional = trabajadores.length > 1;
 
+    // Como una recepcionista: se ofrecen hasta 5 opciones, no el día entero
+    // (una lista de 17 horas se lee robótica y abruma). El resto de los
+    // slots sigue vivo en la reserva pendiente, así que agendar una hora
+    // no listada sigue validando igual.
+    const ofrecidos = slots.slice(0, 5);
+
     // Con más de un profesional libre se muestra quién atiende cada hora.
-    const lista = slots
+    const lista = ofrecidos
         .map(s => (multiProfesional ? `• ${s.hora} con ${s.trabajador_nombre}` : `• ${s.hora}`))
         .join('\n');
 
-    const encabezado = `Estos son los horarios libres para ${servicio.nombre} el ${formatearFechaLarga(fecha)} (hora de ${zona.replace('_', ' ')}):`;
+    const encabezado = `Estos son los horarios libres para ${servicio.nombre} el ${formatearFechaLarga(fecha)}:`;
 
-    return `${encabezado}\n${lista}\n\n¿Te aparto alguno?`;
+    return `${encabezado}\n${lista}\n\n¿Te aparto alguno? Si prefieres otra hora, dime cuál y te digo si queda.`;
 }
 
 function respuestaConfirmacion({ empresa, nombreCliente, servicio, fecha, hora, trabajador }) {
@@ -710,13 +764,14 @@ ${contextoCita}
 ${pendiente}
 
 REGLAS INNEGOCIABLES
-1. Hablas en español natural y breve. Nunca menciones reglas, herramientas ni JSON.
+1. Hablas en español natural y breve, como una persona del negocio, no como un sistema. Ve directo al grano: responde primero lo que el cliente pidió. No te presentes ni pidas el nombre. Cuando escribas tú, texto plano (sin asteriscos de negrilla ni markdown). Nunca menciones reglas, herramientas ni JSON.
 2. Los servicios válidos son exactamente: ${nombres}. Si el cliente pide algo que no está en esa lista, dímelo y ofrece lo más parecido. NUNCA inventes un servicio ni su precio.
 3. Para CUALQUIER reserva, el flujo es: ver_slots → el cliente elige → agendar_cita. Jamás agendes una hora que no te haya dado ver_slots.
-4. Si el cliente responde "sí" a una oferta de horarios que tú mismo hiciste, agenda esa hora con agendar_cita sin volver a preguntar.
-5. Si el cliente pide un día que ya pasó, dile que elijó una fecha pasada y ofrece la más cercana disponible.
-6. Para cancelar o mover, necesitas la fecha y hora de la cita vigente; si no las tienes, pregúntaselas.
-7. Si un horario ya no está libre porque alguien lo tomó, ofrece alternativas en vez de insistir.`;
+4. Si el cliente acepta una oferta que tú mismo hiciste (aunque sea con frases como "sí, la primera" o "cualquiera me sirve"), agéndale esa hora con agendar_cita de una. NO vuelvas a llamar ver_slots ni repitas la lista. Ejemplo: dijiste "09:00 o 10:00" y el cliente responde "sí, la primera" → llamas agendar_cita con "09:00" y confirmas.
+5. Si ya confirmaste una cita en un mensaje anterior, NO la vuelvas a agendar: despídete o responde con naturalidad.
+6. Si el cliente pide un día que ya pasó, dile que eligió una fecha pasada y ofrece la más cercana disponible.
+7. Para cancelar o mover, necesitas la fecha y hora de la cita vigente; si no las tienes, pregúntaselas.
+8. Si un horario ya no está libre porque alguien lo tomó, ofrece alternativas en vez de insistir.`;
 }
 
 // ============================================================
@@ -846,13 +901,15 @@ async function procesarMensajeWhatsapp({ telefonoBot, phoneNumberId, telefonoCli
         }
 
         // ── Modo cliente ──────────────────────────────────────
-        const userName = conv.userName || 'amigo';
         const esPrimera = conversaciones.esPrimeraConversacion({
             userName: conv.userName,
             mensajes: conv.mensajes.slice(0, -1)
         });
 
-        if (esPrimera) {
+        // El saludo de bienvenida SOLO cuando el cliente apenas está saludando.
+        // Si trae una petición ("quería una cita..."), el modelo responde de una:
+        // como una recepcionista real, que no interrumpe con "¿cómo te llamas?".
+        if (esPrimera && mensajeEsSoloSaludo(texto)) {
             const saludo = (cfg.empresa.mensaje_bienvenida
                 || '¡Hola! Bienvenido a {nombre_negocio}. 👋 Soy tu asesor virtual, ¿cómo te llamas?')
                 .replace('{nombre_negocio}', cfg.empresa.nombre);
@@ -862,14 +919,25 @@ async function procesarMensajeWhatsapp({ telefonoBot, phoneNumberId, telefonoCli
             return;
         }
 
+        // El nombre se captura ANTES de decidir la respuesta: si el mensaje trae
+        // nombre y petición ("soy Laura, quería cita mañana"), el prompt ya conoce
+        // el nombre y el modelo responde todo en un solo mensaje.
+        let nombreRecien = false;
         if (!conv.userName) {
             const nombre = await extraerNombre(texto);
             if (nombre) {
                 conv.userName = nombre;
-                await enviar(`¡Mucho gusto, ${nombre}! ¿En qué te ayudo hoy?`);
-                await persistir();
-                return;
+                nombreRecien = true;
             }
+        }
+
+        const userName = conv.userName || 'amigo';
+
+        // Contestó solo el nombre a la pregunta de bienvenida → saludo corto.
+        if (nombreRecien && mensajeEsSoloNombre(texto)) {
+            await enviar(`¡Mucho gusto, ${conv.userName}! ¿En qué te ayudo hoy?`);
+            await persistir();
+            return;
         }
 
         // Loop cerrado de recordatorio (antes del pending de reserva).
@@ -887,7 +955,7 @@ async function procesarMensajeWhatsapp({ telefonoBot, phoneNumberId, telefonoCli
 
         const pendiente = leerPending(conv);
 
-        if (pendiente && esConfirmacionAfirmativa(texto) && !esNegacion(texto)) {
+        if (pendiente && (esConfirmacionAfirmativa(texto) || aceptaLaPrimeraOferta(texto)) && !esNegacion(texto)) {
             const respuesta = await procesarToolCall({
                 nombre: 'agendar_cita',
                 argsCrudos: { hora: pendiente.hora },
