@@ -113,7 +113,8 @@ function zonedToUtc(fechaISO, hora, timeZone) {
     return new Date(instante);
 }
 
-/** "2026-09-28" -> "28 de septiembre de 2026" */
+/** "2026-09-28" -> "28 de septiembre" (el año solo se muestra si no es el actual:
+ *  nadie dice el año de una cita de esta semana) */
 function formatearFechaLarga(fechaISO) {
     const [a, m, d] = String(fechaISO).split('-').map(Number);
     const fecha = new Date(Date.UTC(a, m - 1, d, 12));
@@ -121,15 +122,15 @@ function formatearFechaLarga(fechaISO) {
     return new Intl.DateTimeFormat('es-CO', {
         day: 'numeric',
         month: 'long',
-        year: 'numeric',
+        ...(a !== new Date().getUTCFullYear() ? { year: 'numeric' } : {}),
         timeZone: 'UTC'
     }).format(fecha);
 }
 
-/** "2026-09-28" -> "28/09/2026" */
+/** "2026-09-28" -> "28/09" (o "28/09/2026" si el año no es el actual) */
 function formatearFechaCorta(fechaISO) {
     const [a, m, d] = String(fechaISO).split('-');
-    return `${d}/${m}/${a}`;
+    return Number(a) === new Date().getUTCFullYear() ? `${d}/${m}` : `${d}/${m}/${a}`;
 }
 
 /** "¿10:00" -> true si es una hora con formato HH:MM */

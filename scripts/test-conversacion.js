@@ -275,9 +275,10 @@ function escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, con
     lineas.push(`- Escenario: un día normal de agendamiento por WhatsApp (6 conversaciones, servicio "${servicio.nombre}").`);
     lineas.push(`- Días reales usados en los guiones: ${fechaLarga(dia1.fecha)} y ${fechaLarga(dia2.fecha)}.`);
     if (media) lineas.push(`- Naturalidad media del juez: ${media}/10 sobre ${conNota} respuestas.`);
+    else if (!CON_JUEZ) lineas.push('- Juez: externo al proceso (modelo distinto al del bot); las notas se asignan después de la corrida.');
     lineas.push(`- Respuestas con observaciones de reglas: ${totalFallos}.`);
     lineas.push('');
-    lineas.push(`Cómo leerlo: en cada respuesta, "REGLAS" son chequeos automáticos (una pregunta por mensaje, sin asteriscos, sin repetir saludo, sin precios inventados) y "Naturalidad" es la nota del juez (el mismo modelo que usa el bot, calificando como si fuera un cliente humano de un negocio pequeño).`);
+    lineas.push(`Cómo leerlo: en cada respuesta, "REGLAS" son chequeos automáticos (una pregunta por mensaje, sin asteriscos, sin repetir saludo, sin precios inventados) y "Naturalidad" es ${CON_JUEZ ? 'la nota del juez (el mismo modelo que usa el bot, calificando como si fuera un cliente humano de un negocio pequeño)' : 'la nota del juez externo (GLM, un modelo distinto al del bot), calificando con la conversación completa como contexto'}.`);
     lineas.push('');
 
     // Lo que más vale la pena mirar primero: respuestas flojas del juez.
@@ -292,7 +293,9 @@ function escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, con
     lineas.push(`## Respuestas a mirar primero (${flojas.length})`);
     lineas.push('');
     if (!flojas.length) {
-        lineas.push('Ninguna: el juez dio 7 o más a todo y ningún chequeo de reglas falló.');
+        lineas.push(CON_JUEZ
+            ? 'Ninguna: el juez dio 7 o más a todo y ningún chequeo de reglas falló.'
+            : 'Ningún fallo de reglas. Las notas del juez externo van en cada respuesta más abajo.');
     } else {
         for (const f of flojas) {
             lineas.push(`- **${f.conv}** — Cliente: "${f.paso}" — Bot: "${f.respuesta.replace(/\n/g, ' / ')}" — ${f.fallos.length ? `REGLAS: ${f.fallos.join('; ')}. ` : ''}${f.nota != null ? `Nota: ${f.nota}/10 (${f.motivo})` : 'Nota: ?'}`);
@@ -312,8 +315,10 @@ function escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, con
             }
             lineas.push('');
             if (l.fallos.length) lineas.push(`_REGLAS: ${l.fallos.join('; ')}._`);
-            if (l.nota != null) lineas.push(`_Naturalidad: ${l.nota}/10 — ${l.motivo}._`);
-            else lineas.push(`_Naturalidad: ? — ${l.motivo}._`);
+            if (CON_JUEZ) {
+                if (l.nota != null) lineas.push(`_Naturalidad: ${l.nota}/10 — ${l.motivo}._`);
+                else lineas.push(`_Naturalidad: ? — ${l.motivo}._`);
+            }
             lineas.push('');
         }
     });
@@ -442,7 +447,7 @@ function escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, con
         console.log(`  Total respuestas con observaciones: ${totalFallos}.`);
         if (DEJAR_DATOS) console.log('  (--dejar: NO se borraron los datos de prueba.)');
 
-        if (CON_REPORTE && CON_JUEZ) {
+        if (CON_REPORTE) {
             escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, conNota, totalFallos });
         }
 
