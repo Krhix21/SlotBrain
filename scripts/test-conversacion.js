@@ -14,6 +14,7 @@
 // Uso:
 //   node scripts/test-conversacion.js                     # corrida completa con juez de naturalidad
 //   node scripts/test-conversacion.js --sin-juez          # sin evaluar naturalidad (más rápido)
+//   node scripts/test-conversacion.js --reporte           # además escribe docs/INFORME-CONVERSACIONES.md
 //   node scripts/test-conversacion.js --dejar             # NO borra citas/conversaciones de prueba
 //   node scripts/test-conversacion.js --empresa "Otra"    # otra empresa (nunca una con calendario real)
 //
@@ -64,6 +65,7 @@ const EMPRESA_DEFAULT = 'Clinica Sonrisa Dental (PRUEBA)';
 const NOMBRE_EMPRESA = valorDe('--empresa') || EMPRESA_DEFAULT;
 const CON_JUEZ = !opt('--sin-juez');
 const DEJAR_DATOS = opt('--dejar'); // para depurar: no borra nada al final
+const CON_REPORTE = opt('--reporte'); // además escribe docs/INFORME-CONVERSACIONES.md
 const FORZAR = opt('--forzar');
 
 // Número de bot de prueba: una fila inerte en numeros_bot (Meta jamás
@@ -257,6 +259,70 @@ function guiones({ servicio, dia1, dia2 }) {
     ];
 }
 
+// ── Reporte para revisión humana ───────────────────────────────
+// Escribe docs/INFORME-CONVERSACIONES.md con las conversaciones completas
+// (texto tal cual, sin aplanar saltos de línea) y el veredicto del juez
+// por respuesta, para que el dueño evalúe y decida qué pulir.
+function escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, conNota, totalFallos }) {
+    const fs = require('fs');
+    const fecha = new Intl.DateTimeFormat('es-CO', { dateStyle: 'long', timeStyle: 'short', timeZone: 'America/Bogota' }).format(new Date());
+
+    const lineas = [];
+    lineas.push(`# Informe de conversaciones del bot (juez de naturalidad)`);
+    lineas.push('');
+    lineas.push(`- Corrida: ${fecha} (hora Bogotá)`);
+    lineas.push(`- Empresa: ${empresa.nombre}`);
+    lineas.push(`- Escenario: un día normal de agendamiento por WhatsApp (6 conversaciones, servicio "${servicio.nombre}").`);
+    lineas.push(`- Días reales usados en los guiones: ${fechaLarga(dia1.fecha)} y ${fechaLarga(dia2.fecha)}.`);
+    if (media) lineas.push(`- Naturalidad media del juez: ${media}/10 sobre ${conNota} respuestas.`);
+    lineas.push(`- Respuestas con observaciones de reglas: ${totalFallos}.`);
+    lineas.push('');
+    lineas.push(`Cómo leerlo: en cada respuesta, "REGLAS" son chequeos automáticos (una pregunta por mensaje, sin asteriscos, sin repetir saludo, sin precios inventados) y "Naturalidad" es la nota del juez (el mismo modelo que usa el bot, calificando como si fuera un cliente humano de un negocio pequeño).`);
+    lineas.push('');
+
+    // Lo que más vale la pena mirar primero: respuestas flojas del juez.
+    const flojas = [];
+    for (const r of resultados) {
+        for (const l of r.lineas) {
+            if ((l.nota != null && l.nota <= 6) || l.fallos.length) {
+                flojas.push({ conv: r.nombre, ...l });
+            }
+        }
+    }
+    lineas.push(`## Respuestas a mirar primero (${flojas.length})`);
+    lineas.push('');
+    if (!flojas.length) {
+        lineas.push('Ninguna: el juez dio 7 o más a todo y ningún chequeo de reglas falló.');
+    } else {
+        for (const f of flojas) {
+            lineas.push(`- **${f.conv}** — Cliente: "${f.paso}" — Bot: "${f.respuesta.replace(/\n/g, ' / ')}" — ${f.fallos.length ? `REGLAS: ${f.fallos.join('; ')}. ` : ''}${f.nota != null ? `Nota: ${f.nota}/10 (${f.motivo})` : 'Nota: ?'}`);
+        }
+    }
+    lineas.push('');
+
+    resultados.forEach((r, i) => {
+        lineas.push(`## ${i + 1}. ${r.nombre}`);
+        lineas.push('');
+        for (const l of r.lineas) {
+            lineas.push(`**Cliente:** ${l.paso}`);
+            lineas.push('');
+            lineas.push(`**Bot:**`);
+            for (const linea of l.respuesta.split('\n')) {
+                lineas.push(`> ${linea}`);
+            }
+            lineas.push('');
+            if (l.fallos.length) lineas.push(`_REGLAS: ${l.fallos.join('; ')}._`);
+            if (l.nota != null) lineas.push(`_Naturalidad: ${l.nota}/10 — ${l.motivo}._`);
+            else lineas.push(`_Naturalidad: ? — ${l.motivo}._`);
+            lineas.push('');
+        }
+    });
+
+    const destino = path.join(__dirname, '..', 'docs', 'INFORME-CONVERSACIONES.md');
+    fs.writeFileSync(destino, lineas.join('\n'), 'utf8');
+    console.log(`\nReporte escrito: docs/INFORME-CONVERSACIONES.md`);
+}
+
 // ── Main ───────────────────────────────────────────────────────
 (async () => {
     const telefonosFalsos = [];
@@ -375,6 +441,10 @@ function guiones({ servicio, dia1, dia2 }) {
         if (media) console.log(`\n  Naturalidad media (juez): ${media}/10 sobre ${conNota} respuestas.`);
         console.log(`  Total respuestas con observaciones: ${totalFallos}.`);
         if (DEJAR_DATOS) console.log('  (--dejar: NO se borraron los datos de prueba.)');
+
+        if (CON_REPORTE && CON_JUEZ) {
+            escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, conNota, totalFallos });
+        }
 
         if (totalFallos > 0) process.exitCode = 1;
     } catch (e) {
