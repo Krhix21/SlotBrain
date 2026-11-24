@@ -52,6 +52,7 @@ const bot = require(path.join(__dirname, '..', 'bot'));
 const disponibilidad = require(path.join(__dirname, '..', 'disponibilidad'));
 const { escenariosAjuste } = require('./escenarios-ajuste');
 const { escenariosValidacion } = require('./escenarios-validacion');
+const tiempo = require(path.join(__dirname, '..', 'tiempo'));
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
@@ -72,6 +73,7 @@ const FORZAR = opt('--forzar');
 const SET = (valorDe('--set') || 'ajuste').toLowerCase();
 const CORRIDAS = Math.max(1, Number(valorDe('--corridas') || 1));
 const CON_NICHOS = opt('--nichos');
+const RELOJ_ISO = valorDe('--reloj') || '2026-11-23T15:00:00.000Z';
 
 // Número de bot de prueba: una fila inerte en numeros_bot (Meta jamás
 // manda webhooks con este id, es solo para rutear la empresa en local).
@@ -128,9 +130,10 @@ function chequearRespuesta(texto, memoria) {
     if (!texto || !texto.trim()) return ['respuesta vacía'];
     if (texto.length > 400) fallos.push(`demasiado larga (${texto.length} caracteres)`);
 
-    // Una sola pregunta por mensaje.
+    // Una sola pregunta por mensaje (salvo oferta + pedir nombre).
     const preguntas = (texto.match(/\?/g) || []).length;
-    if (preguntas > 1) fallos.push(`${preguntas} preguntas en un solo mensaje`);
+    const permiteNombre = /¿A nombre de quién\?/i.test(texto) && preguntas === 2;
+    if (preguntas > 1 && !permiteNombre) fallos.push(`${preguntas} preguntas en un solo mensaje`);
 
     // Sin asteriscos ni listas que no sean de horas.
     if (texto.includes('*')) fallos.push('usa asteriscos');
@@ -181,6 +184,13 @@ function chequearLogica({ paso, respuesta, tags, memoriaConv }) {
     }
     if (tagsSet.has('gracias') && paso.toLowerCase().includes('gracias') && /perfecto[!¡]/i.test(t)) {
         fallos.push('respondió Perfecto a un gracias');
+    }
+    if (/\?\s*$/.test(t) && !/\d{1,2}:\d{2}/.test(t) && !/(hoy|mañana|lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo)/i.test(t)
+        && /(te gustaría|prefieres|te ofrezco otro|hoy o mañana|agendar una)/i.test(t)) {
+        fallos.push('callejón sin salida: pregunta sin oferta concreta');
+    }
+    if (/¿Te ofrezco otro día\?/i.test(t)) {
+        fallos.push('callejón: ofreció otro día sin horarios');
     }
     if (tagsSet.has('precio')) {
         const montos = [...(t.match(/\d[\d.,]*/g) || [])].map(x => parseInt(x.replace(/\D/g, ''), 10)).filter(n => n > 0);
@@ -330,7 +340,9 @@ function escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, con
         if (!FORZAR && /xheros/i.test(empresa.nombre)) {
             throw new Error('Xheros tiene calendario real: no se usa para pruebas. Usa la clínica de prueba.');
         }
+        tiempo.setAhoraSimulado(RELOJ_ISO);
         console.log(`Empresa: ${empresa.nombre}`);
+        console.log(`Reloj simulado: ${RELOJ_ISO} (${tiempo.hoyEnZona(empresa.zona_horaria || 'America/Bogota')} ${tiempo.horaAhoraEnZona(empresa.zona_horaria || 'America/Bogota')})`);
         console.log(`Seguridad: GOOGLE_CALENDAR_ON forzado a false para esta corrida.\n`);
 
         // 2) Servicios reales (para los precios válidos y los guiones).
@@ -361,7 +373,7 @@ function escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, con
         }
 
         // 4) Días y horas reales para que los guiones pidan cosas posibles.
-        const desde = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
+        const desde = new Date(tiempo.hoyEnZona(empresa.zona_horaria || 'America/Bogota') + 'T12:00:00Z');
         const dia1 = await buscarDiaConSlots({ empresa, servicios, servicio, desde });
         if (!dia1) throw new Error('No hay ningún día con slots en los próximos 10 días: ajusta el horario de la empresa de prueba.');
         const dia2 = (await buscarDiaConSlots({ empresa, servicios, servicio, desde, saltar: dia1.fecha }))
@@ -427,6 +439,19 @@ function escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, con
             }
 
             if (fallosConv) totalFallos += fallosConv;
+
+            if ((conv.tags || []).includes('espera_cita')) {
+                const { count, error: eCount } = await supabase
+                    .from('citas')
+                    .select('id', { count: 'exact', head: true })
+                    .eq('telefono_cliente', telefono);
+                if (eCount) console.warn('count citas:', eCount.message);
+                if (!(count > 0)) {
+                    fallosConv++;
+                    lineas.push({ paso: '(chequeo final)', respuesta: '(sin cita en BD)', fallos: ['espera_cita: no quedó registro de cita'], nota: null, motivo: '' });
+                    console.log('  REGLAS  : espera_cita: no quedó registro de cita');
+                }
+            }
             resultados.push({ nombre: conv.nombre, telefono, lineas, fallos: fallosConv });
         }
 
@@ -453,6 +478,7 @@ function escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, con
         console.error('\nERROR: ' + e.message);
         process.exitCode = 1;
     } finally {
+        try { tiempo.limpiarAhoraSimulado(); } catch (_) {}
         if (!DEJAR_DATOS) {
             // Limpieza: citas, conversaciones y el número de prueba.
             if (telefonosFalsos.length) {
