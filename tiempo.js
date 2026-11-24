@@ -23,6 +23,35 @@ const HORARIO_POR_DEFECTO = {
 
 const ZONA_POR_DEFECTO = 'America/Bogota';
 
+// Reloj inyectable para pruebas reproducibles (null = hora real).
+let ahoraSimuladoMs = null;
+
+function setAhoraSimulado(isoOMs) {
+    if (isoOMs == null) {
+        ahoraSimuladoMs = null;
+        return;
+    }
+    if (typeof isoOMs === 'number') {
+        ahoraSimuladoMs = isoOMs;
+        return;
+    }
+    const t = Date.parse(String(isoOMs));
+    if (Number.isNaN(t)) throw new Error('setAhoraSimulado: fecha inválida');
+    ahoraSimuladoMs = t;
+}
+
+function limpiarAhoraSimulado() {
+    ahoraSimuladoMs = null;
+}
+
+function ahoraMs() {
+    return ahoraSimuladoMs == null ? Date.now() : ahoraSimuladoMs;
+}
+
+function ahoraDate() {
+    return new Date(ahoraMs());
+}
+
 /** "HH:MM" -> minutos desde medianoche. */
 function minutosDesdeHora(hhmm) {
     const [h, m] = String(hhmm || '0:0').split(':').map(Number);
@@ -58,7 +87,7 @@ function hoyEnZona(timeZone) {
         year: 'numeric',
         month: '2-digit',
         day: '2-digit'
-    }).format(new Date());
+    }).format(ahoraDate());
 }
 
 /** Hora actual "HH:MM" en la zona de la empresa. */
@@ -68,7 +97,7 @@ function horaAhoraEnZona(timeZone) {
         hour: '2-digit',
         minute: '2-digit',
         hour12: false
-    }).format(new Date());
+    }).format(ahoraDate());
 }
 
 /**
@@ -220,5 +249,9 @@ module.exports = {
     formatearFechaCorta,
     esHoraValida,
     normalizarHora,
-    esFechaValida
+    esFechaValida,
+    ahoraMs,
+    ahoraDate,
+    setAhoraSimulado,
+    limpiarAhoraSimulado
 };

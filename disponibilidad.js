@@ -24,7 +24,10 @@ const {
     horaDesdeMinutos,
     claveDiaSemana,
     zonedToUtc,
-    esFechaValida
+    esFechaValida,
+    ahoraMs,
+    hoyEnZona,
+    sumarDias
 } = require('./tiempo');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
@@ -288,7 +291,7 @@ async function slotsDeTrabajador({ trabajador, empresa, fecha, duracionMinutos, 
     if (ventanas.length === 0) return { slots: [], inaccesible: false, sinHorario: true };
 
     const paso = pasoDeSlots(trabajador, empresa);
-    const ahora = Date.now();
+    const ahora = ahoraMs();
 
     const [ocupado, bloqueos] = await Promise.all([
         ocupadoDeTrabajador(
@@ -418,7 +421,7 @@ async function obtenerSlots({ empresa, servicios = [], fecha, duracionMinutos = 
     const motivo = (slots.length === 0 && inaccesibles.length > 0)
         ? `No pude leer el calendario de ${inaccesibles.map(r => r.trabajador.nombre || 'el profesional').join(', ')}.`
         : (slots.length === 0 && todosSinHorario)
-            ? 'Ese día no atendemos. ¿Te ofrezco otro día?'
+            ? 'Ese día no atendemos.'
             : null;
 
     return { slots, trabajadores, motivo };
@@ -449,7 +452,7 @@ async function confirmarSlot({ empresa, trabajador, fecha, hora, duracionMinutos
     const inicioMs = zonedToUtc(fecha, hora, zona).getTime();
     const finMs = zonedToUtc(fecha, horaDesdeMinutos(minutosDesdeHora(hora) + duracionMinutos), zona).getTime();
 
-    if (inicioMs <= Date.now()) {
+    if (inicioMs <= ahoraMs()) {
         return { libre: false, motivo: 'ese horario ya pasó' };
     }
 
@@ -500,11 +503,36 @@ async function confirmarSlot({ empresa, trabajador, fecha, hora, duracionMinutos
     return { libre: true, motivo: null };
 }
 
+async function buscarPrimerDiaConSlots({ empresa, servicios = [], servicio = null, desdeFecha = null, saltar = null, maxDias = 14 }) {
+    const zona = empresa?.zona_horaria || ZONA_POR_DEFECTO;
+    let fecha = desdeFecha || hoyEnZona(zona);
+    if (!esFechaValida(fecha)) fecha = hoyEnZona(zona);
+    const duracion = servicio?.duracion_minutos || 60;
+    const servicioId = servicio?.id || null;
+
+    for (let i = 0; i < maxDias; i++) {
+        const dia = sumarDias(fecha, i);
+        if (saltar && dia === saltar) continue;
+        const r = await obtenerSlots({
+            empresa,
+            servicios,
+            fecha: dia,
+            duracionMinutos: duracion,
+            servicioId
+        });
+        if (r.slots && r.slots.length > 0) {
+            return { fecha: dia, slots: r.slots, trabajadores: r.trabajadores, motivo: null };
+        }
+    }
+    return { fecha: null, slots: [], trabajadores: [], motivo: 'No encontré horarios libres en los próximos días.' };
+}
+
 module.exports = {
     obtenerTrabajadores,
     obtenerSlots,
     slotsDeTrabajador,
     confirmarSlot,
     serviciosDe,
-    ventanasDelDia
+    ventanasDelDia,
+    buscarPrimerDiaConSlots
 };

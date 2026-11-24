@@ -5,6 +5,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { enviarMensajeTexto, marcarComoLeido, esBsuid } = require('./whatsappCloud');
 const voz = require('./voz');
 const estiloMod = require('./estilo');
+const ofertas = require('./ofertas');
 const memoria = require('./memoria');
 const numeros = require('./numeros');
 const conversaciones = require('./conversaciones');
@@ -130,6 +131,12 @@ function preguntaSiEsBot(texto) {
     return /\b(eres un bot|sos un bot|es un bot|eres (una )?ia|eres (una )?inteligencia|hablando con un bot|sos (un )?robot)\b/i
         .test(String(texto || ''));
 }
+
+function pideLoMasPronto(texto) {
+    return /\b(lo m[aá]s pronto|lo antes|cuanto antes|la m[aá]s cercana|primera que (tenga|haya|puedas)|lo que (tengan|haya))\b/i
+        .test(String(texto || ''));
+}
+
 
 /** El cliente pide explícitamente un día que ya pasó. */
 function pideFechaPasada(texto, zona) {
@@ -386,7 +393,7 @@ async function ejecutarVerSlots({ config, args }) {
             : fecha === manana
                 ? 'Para mañana'
                 : `Para el ${formatearFechaCorta(fecha)}`;
-        return { exitoso: true, slots: [], sinHoras: true, mensaje: motivo || `${relativo} ya no nos quedan horas. ¿Te ofrezco otro día?` };
+        return { exitoso: true, slots: [], sinHoras: true, mensaje: motivo || `${relativo} ya no nos quedan horas.` };
     }
 
     return {
@@ -631,7 +638,7 @@ function slotMasCercano(slots, hora) {
     return mejor;
 }
 
-function formatearOfertaSlots({ empresa, slots, trabajadores, servicio, fecha }) {
+function formatearOfertaSlots({ empresa, slots, trabajadores, servicio, fecha, userName, prefijo }) {
     const multiProfesional = trabajadores.length > 1;
     const zona = empresa?.zona_horaria || 'America/Bogota';
     const ofrecidos = slots.slice(0, 3);
@@ -641,11 +648,39 @@ function formatearOfertaSlots({ empresa, slots, trabajadores, servicio, fecha })
 
     const fechaTexto = formatearFechaCercana(fecha, zona);
     const encabezado = estiloMod.aperturaOferta(servicio.nombre, fechaTexto);
-
-    return `${encabezado}\n${lista}\n\n¿Te aparto alguno?`;
+    const nombreBit = estiloMod.sufijoPedirNombre(userName);
+    const cabeza = prefijo ? `${prefijo}\n` : '';
+    return `${cabeza}${encabezado}\n${lista}\n\n¿Te aparto alguno?${nombreBit}`;
 }
 
-function respuestaConfirmacion({ empresa, nombreCliente, servicio, fecha, hora, trabajador, pedirNombre }) {
+function formatearOfertaDiaLleno({ empresa, fechaPedida, siguiente, userName }) {
+    const zona = empresa?.zona_horaria || 'America/Bogota';
+    const hoy = hoyEnZona(zona);
+    const manana = sumarDias(hoy, 1);
+    const ofrecidos = siguiente.slots.slice(0, 3);
+    const horasTxt = ofrecidos.map(s => s.hora).join(', ');
+    const nombreBit = estiloMod.sufijoPedirNombre(userName);
+
+    let pref;
+    if (fechaPedida === hoy) pref = 'Hoy ya no tengo';
+    else if (fechaPedida === manana) pref = 'Mañana ya no tengo';
+    else pref = `Ese día ya no tengo`;
+
+    let cuando;
+    if (siguiente.fecha === manana) {
+        const nombreDia = new Intl.DateTimeFormat('es-CO', { weekday: 'long', timeZone: 'UTC' })
+            .format(new Date(siguiente.fecha + 'T12:00:00Z'));
+        cuando = `mañana ${nombreDia}`;
+    } else if (siguiente.fecha === hoy) {
+        cuando = 'hoy';
+    } else {
+        cuando = formatearFechaCercana(siguiente.fecha, zona);
+    }
+
+    return `${pref}; ${cuando} tengo ${horasTxt}, ¿te aparto alguna?${nombreBit}`;
+}
+
+function respuestaConfirmacion({ empresa, nombreCliente, servicio, fecha, hora, trabajador }) {
     const zona = empresa?.zona_horaria || 'America/Bogota';
     const plantilla = estiloMod.confirmacionEfectiva(empresa);
     let texto = estiloMod.aplicarConfirmacion(plantilla, {
@@ -656,10 +691,6 @@ function respuestaConfirmacion({ empresa, nombreCliente, servicio, fecha, hora, 
         profesional: trabajador?.nombre || 'nuestro equipo',
         nombreNegocio: empresa?.nombre || 'nuestro negocio'
     });
-
-    if (pedirNombre && !nombreCliente) {
-        texto += ' ¿A nombre de quién la dejo?';
-    }
 
     return texto;
 }
@@ -674,69 +705,66 @@ async function procesarToolCall({ nombre, argsCrudos, config, bot, conv, telefon
 
     if (nombre === 'ver_slots') {
         let resultado = await ejecutarVerSlots({ config, args });
+        const servicio = servicioPorNombre(config.servicios, args.servicio);
+        const zona = config.empresa.zona_horaria || 'America/Bogota';
+        const fechaPedida = normalizarFecha(args.fecha);
 
-        const pideProntoTxt = /\b(lo m[aá]s pronto|lo antes|cuanto antes|la m[aá]s cercana)\b/i.test(String(textoCliente || ''));
-        if (resultado.exitoso && resultado.sinHoras && pideProntoTxt) {
-            const zonaP = config.empresa.zona_horaria || 'America/Bogota';
-            const hoyP = hoyEnZona(zonaP);
-            const fechaPedida = normalizarFecha(args.fecha);
-            if (fechaPedida === hoyP) {
-                resultado = await ejecutarVerSlots({
-                    config,
-                    args: { ...args, fecha: sumarDias(hoyP, 1) }
+        if (resultado.exitoso && (!resultado.slots || resultado.slots.length === 0) && servicio) {
+            const oferta = await ofertas.ofrecerProntoOAlterna({
+                config,
+                servicio,
+                fechaPedida,
+                userName
+            });
+            if (oferta.pending) {
+                guardarPending(conv, {
+                    empresaId: oferta.pending.empresaId,
+                    servicio: oferta.pending.servicio,
+                    fecha: oferta.pending.fecha,
+                    hora: oferta.pending.hora,
+                    trabajadorId: oferta.pending.trabajadorId,
+                    slots: oferta.pending.slots,
+                    modoOferta: oferta.pending.modoOferta
                 });
             }
+            return oferta.respuesta;
         }
 
         if (resultado.exitoso && resultado.slots.length > 0) {
-            const servicio = servicioPorNombre(config.servicios, args.servicio);
             let primerSlot = resultado.slots[0];
             let respuesta = null;
-
-            // El cliente preguntó por una hora concreta ("¿Tiene a las 09:00?"):
-            // se responde sí o no sobre ESA hora, como haría una recepcionista,
-            // en vez de volver a soltar la lista entera.
-            const zona = config.empresa.zona_horaria || 'America/Bogota';
             const fechaTxt = formatearFechaCercana(resultado.fecha, zona);
             let modoOferta = 'lista';
+            const nombreBit = estiloMod.sufijoPedirNombre(userName);
+
             const horaPedida = horaConcretaDelTexto(textoCliente);
             if (horaPedida) {
                 const exacto = resultado.slots.find(s => s.hora === horaPedida);
                 if (exacto) {
                     primerSlot = exacto;
                     modoOferta = 'unica';
-                    respuesta = `Sí, a las ${horaPedida} hay espacio para ${servicio.nombre} ${fechaTxt}. ¿Te la aparto?`;
+                    respuesta = `Sí, a las ${horaPedida} hay espacio para ${servicio.nombre} ${fechaTxt}. ¿Te la aparto?${nombreBit}`;
                 } else {
                     const cercano = slotMasCercano(resultado.slots, horaPedida);
                     if (cercano) {
                         primerSlot = cercano;
                         modoOferta = 'unica';
-                        respuesta = `A las ${horaPedida} ya está reservada; la más cercana libre es a las ${cercano.hora}. ¿Te la aparto?`;
+                        respuesta = `A las ${horaPedida} ya está reservada; la más cercana libre es a las ${cercano.hora}. ¿Te la aparto?${nombreBit}`;
                     }
                 }
             }
 
             if (!respuesta) {
-                const pidePronto = /\b(lo m[aá]s pronto|lo antes|la m[aá]s cercana|primera que (tenga|haya)|cuanto antes|lo que (tengan|haya))\b/i.test(String(textoCliente || ''));
-                if (pidePronto) {
-                    modoOferta = 'unica';
-                    const zonaP = config.empresa.zona_horaria || 'America/Bogota';
-                    respuesta = `Lo más cercano que tengo es ${formatearFechaCercana(resultado.fecha, zonaP)} a las ${primerSlot.hora}. ¿Te la aparto?`;
-                } else {
-                    respuesta = formatearOfertaSlots({
-                        empresa: config.empresa,
-                        slots: resultado.slots,
-                        trabajadores: resultado.trabajadores,
-                        servicio,
-                        fecha: resultado.fecha
-                    });
-                    modoOferta = 'lista';
-                }
+                respuesta = ofertas.formatearOfertaSlots({
+                    empresa: config.empresa,
+                    slots: resultado.slots,
+                    trabajadores: resultado.trabajadores,
+                    servicio,
+                    fecha: resultado.fecha,
+                    userName
+                });
+                modoOferta = 'lista';
             }
-
-            const slotsParaPending = modoOferta === 'unica'
-                ? [`${primerSlot.trabajador_id}|${primerSlot.hora}`]
-                : resultado.slots.slice(0, 3).map(s => `${s.trabajador_id}|${s.hora}`);
 
             guardarPending(conv, {
                 empresaId: config.empresa.id,
@@ -744,7 +772,9 @@ async function procesarToolCall({ nombre, argsCrudos, config, bot, conv, telefon
                 fecha: resultado.fecha,
                 hora: primerSlot.hora,
                 trabajadorId: primerSlot.trabajador_id,
-                slots: slotsParaPending,
+                slots: modoOferta === 'unica'
+                    ? [`${primerSlot.trabajador_id}|${primerSlot.hora}`]
+                    : resultado.slots.slice(0, 3).map(s => `${s.trabajador_id}|${s.hora}`),
                 modoOferta
             });
 
@@ -756,8 +786,8 @@ async function procesarToolCall({ nombre, argsCrudos, config, bot, conv, telefon
         const motivo = String(resultado.mensaje || '');
         const esTecnico = /calendar|calendario|token|panel|base de datos/i.test(motivo);
         return esTecnico
-            ? 'Ahora mismo no tengo horarios disponibles para esa fecha. ¿Quieres que mire otro día?'
-            : motivo || 'No encontré horarios disponibles para esa fecha.';
+            ? 'Ahora mismo no tengo horarios disponibles.'
+            : (motivo.replace(/¿Te ofrezco otro día\?/gi, '').trim() || 'No encontré horarios disponibles en los próximos días.');
     }
 
     if (nombre === 'agendar_cita') {
@@ -792,7 +822,6 @@ async function procesarToolCall({ nombre, argsCrudos, config, bot, conv, telefon
             fecha: resultado.fecha,
             hora: resultado.hora,
             trabajador: resultado.trabajador,
-            pedirNombre: !nombreCliente
         });
     }
 
@@ -1189,7 +1218,7 @@ async function procesarMensajeWhatsapp({ telefonoBot, phoneNumberId, telefonoCli
             return;
         }
         if (cortesia === 'despedida') {
-            await enviar(estiloMod.respuestaDespedida());
+            await enviar(estiloMod.respuestaDespedida(userName || conv.userName || null));
             await persistir();
             return;
         }
@@ -1252,6 +1281,32 @@ async function procesarMensajeWhatsapp({ telefonoBot, phoneNumberId, telefonoCli
             await enviar('Va, no te aparto nada. ¿Buscamos otro horario?');
             await persistir();
             return;
+        }
+
+        if (ofertas.pideLoMasPronto(texto) && !leerPending(conv)) {
+            const servicioPronto = cfg.servicios[0] || null;
+            if (servicioPronto) {
+                const oferta = await ofertas.ofrecerProntoOAlterna({
+                    config: cfg,
+                    servicio: servicioPronto,
+                    fechaPedida: hoyEnZona(zona),
+                    userName
+                });
+                if (oferta.pending) {
+                    guardarPending(conv, {
+                        empresaId: oferta.pending.empresaId,
+                        servicio: oferta.pending.servicio,
+                        fecha: oferta.pending.fecha,
+                        hora: oferta.pending.hora,
+                        trabajadorId: oferta.pending.trabajadorId,
+                        slots: oferta.pending.slots,
+                        modoOferta: oferta.pending.modoOferta
+                    });
+                }
+                await enviar(oferta.respuesta);
+                await persistir();
+                return;
+            }
         }
 
         const mensajes = [

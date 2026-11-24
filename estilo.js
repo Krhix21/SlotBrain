@@ -171,7 +171,7 @@ function aplicarConfirmacion(plantilla, { nombreCliente, servicio, fecha, hora, 
 const APERTURAS_OFERTA = [
     (s, f) => `Para ${s} ${f} tengo estos horarios:`,
     (s, f) => `Mira, ${f} para ${s} me cuadran:`,
-    (s, f) => `Estos huecos tengo ${f} para ${s}:`,
+    (s, f) => `Estos horarios tengo ${f} para ${s}:`,
     (s, f) => `${f.charAt(0).toUpperCase() + f.slice(1)} para ${s} puedo ofrecerte:`,
     (s, f) => `Lo que tengo libre ${f} para ${s}:`,
     (s, f) => `Te muestro lo disponible ${f} para ${s}:`
@@ -185,24 +185,31 @@ function aperturaOferta(servicioNombre, fechaTexto) {
 const RESPUESTAS_GRACIAS = [
     '¡De nada!',
     'Con gusto',
-    '¡Un placer!',
-    'Cuando quieras',
-    'Para eso estamos'
-];
-
-const RESPUESTAS_DESPEDIDA = [
-    '¡Que tengas un buen día!',
-    'Hasta luego',
-    'Cualquier cosa me escribes',
-    'Que te vaya bien'
+    '¡Un placer!'
 ];
 
 function respuestaGracias() {
     return RESPUESTAS_GRACIAS[Math.floor(Math.random() * RESPUESTAS_GRACIAS.length)];
 }
 
-function respuestaDespedida() {
-    return RESPUESTAS_DESPEDIDA[Math.floor(Math.random() * RESPUESTAS_DESPEDIDA.length)];
+function respuestaDespedida(nombre) {
+    if (nombre) {
+        const conNombre = [
+            `¡Hasta luego, ${nombre}!`,
+            `¡Que tengas un buen día, ${nombre}!`
+        ];
+        return conNombre[Math.floor(Math.random() * conNombre.length)];
+    }
+    const sinNombre = [
+        '¡Hasta luego!',
+        '¡Que tengas un buen día!'
+    ];
+    return sinNombre[Math.floor(Math.random() * sinNombre.length)];
+}
+
+function sufijoPedirNombre(userName) {
+    if (userName) return '';
+    return ' ¿A nombre de quién?';
 }
 
 function respuestaEresUnBot(empresa) {
@@ -228,6 +235,7 @@ module.exports = {
     aperturaOferta,
     respuestaGracias,
     respuestaDespedida,
+    sufijoPedirNombre,
     respuestaEresUnBot,
     esPlantillaBienvenidaLegacy
 };
