@@ -127,6 +127,27 @@ function formatearFechaLarga(fechaISO) {
     }).format(fecha);
 }
 
+/** Fechas próximas como las dice una persona: "hoy", "mañana", "el martes". */
+function formatearFechaCercana(fechaISO, timeZone) {
+    if (!esFechaValida(fechaISO)) return formatearFechaLarga(fechaISO);
+    const zona = timeZone || ZONA_POR_DEFECTO;
+    const hoy = hoyEnZona(zona);
+    if (fechaISO === hoy) return 'hoy';
+    if (fechaISO === sumarDias(hoy, 1)) return 'mañana';
+
+    const [a, m, d] = fechaISO.split('-').map(Number);
+    const objetivo = Date.UTC(a, m - 1, d, 12);
+    const [ha, hm, hd] = hoy.split('-').map(Number);
+    const base = Date.UTC(ha, hm - 1, hd, 12);
+    const dias = Math.round((objetivo - base) / 86400000);
+    if (dias >= 2 && dias <= 6) {
+        const nombre = new Intl.DateTimeFormat('es-CO', { weekday: 'long', timeZone: 'UTC' })
+            .format(new Date(objetivo));
+        return `el ${nombre}`;
+    }
+    return formatearFechaLarga(fechaISO);
+}
+
 /** "2026-09-28" -> "28/09" (o "28/09/2026" si el año no es el actual) */
 function formatearFechaCorta(fechaISO) {
     const [a, m, d] = String(fechaISO).split('-');
@@ -195,6 +216,7 @@ module.exports = {
     horaAhoraEnZona,
     zonedToUtc,
     formatearFechaLarga,
+    formatearFechaCercana,
     formatearFechaCorta,
     esHoraValida,
     normalizarHora,

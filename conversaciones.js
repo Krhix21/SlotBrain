@@ -6,6 +6,8 @@
 //   · alternativa: (telefono_bot, bsuid) cuando Meta omite el número
 //
 // Topes: últimos 6 mensajes, 500 chars; barrido a los 30 días.
+// bot_pausado / fallos_entendimiento: columnas v11 (si no existen,
+// se mantienen en memoria de proceso).
 // ============================================================
 
 const { createClient } = require('@supabase/supabase-js');
@@ -19,6 +21,12 @@ const DIAS_EXPIRA = 30;
 const INTERVALO_BARRIDO_MS = 6 * 60 * 60 * 1000;
 
 let ultimoBarrido = 0;
+let columnasV11 = null;
+const pausasMemoria = new Map();
+
+function clavePausa(telefonoBot, id) {
+    return `${telefonoBot}|${id.telefonoCliente || ''}|${id.bsuid || ''}`;
+}
 
 function vacia() {
     return {
@@ -28,6 +36,8 @@ function vacia() {
         pendingBooking: null,
         pendingReminder: null,
         pendingOwnerAction: null,
+        botPausado: false,
+        fallosEntendimiento: 0,
         bsuid: null,
         telefonoCliente: null
     };
@@ -44,11 +54,27 @@ function partirIdentidad(telefonoCliente, bsuid) {
     return { telefonoCliente: tel || null, bsuid: uid || null };
 }
 
-/**
- * @param {string} telefonoBot
- * @param {string|null} telefonoCliente
- * @param {{bsuid?:string|null}} [opts]
- */
+const SELECT_BASE = 'user_name, mensajes, ultima_cita, pending_booking, pending_reminder, pending_owner_action, bsuid, telefono_cliente';
+const SELECT_V11 = SELECT_BASE + ', bot_pausado, fallos_entendimiento';
+
+async function selectConversacion(filtro) {
+    const cols = columnasV11 === false ? SELECT_BASE : SELECT_V11;
+    let q = supabase.from('conversaciones').select(cols);
+    for (const [k, v] of Object.entries(filtro)) q = q.eq(k, v);
+    let { data, error } = await q.maybeSingle();
+
+    if (error && columnasV11 !== false && /bot_pausado|fallos_entendimiento|schema cache|does not exist/i.test(error.message)) {
+        columnasV11 = false;
+        q = supabase.from('conversaciones').select(SELECT_BASE);
+        for (const [k, v] of Object.entries(filtro)) q = q.eq(k, v);
+        ({ data, error } = await q.maybeSingle());
+    } else if (!error && columnasV11 !== false) {
+        columnasV11 = true;
+    }
+
+    return { data, error };
+}
+
 async function cargar(telefonoBot, telefonoCliente, opts = {}) {
     const id = partirIdentidad(telefonoCliente, opts.bsuid || null);
     if (!telefonoBot || (!id.telefonoCliente && !id.bsuid)) return vacia();
@@ -57,21 +83,17 @@ async function cargar(telefonoBot, telefonoCliente, opts = {}) {
     let error = null;
 
     if (id.telefonoCliente) {
-        ({ data, error } = await supabase
-            .from('conversaciones')
-            .select('user_name, mensajes, ultima_cita, pending_booking, pending_reminder, pending_owner_action, bsuid, telefono_cliente')
-            .eq('telefono_bot', telefonoBot)
-            .eq('telefono_cliente', id.telefonoCliente)
-            .maybeSingle());
+        ({ data, error } = await selectConversacion({
+            telefono_bot: telefonoBot,
+            telefono_cliente: id.telefonoCliente
+        }));
     }
 
     if (!data && !error && id.bsuid) {
-        ({ data, error } = await supabase
-            .from('conversaciones')
-            .select('user_name, mensajes, ultima_cita, pending_booking, pending_reminder, pending_owner_action, bsuid, telefono_cliente')
-            .eq('telefono_bot', telefonoBot)
-            .eq('bsuid', id.bsuid)
-            .maybeSingle());
+        ({ data, error } = await selectConversacion({
+            telefono_bot: telefonoBot,
+            bsuid: id.bsuid
+        }));
     }
 
     if (error) {
@@ -79,10 +101,14 @@ async function cargar(telefonoBot, telefonoCliente, opts = {}) {
         return vacia();
     }
 
+    const mem = pausasMemoria.get(clavePausa(telefonoBot, id)) || {};
+
     if (!data) {
         const v = vacia();
         v.telefonoCliente = id.telefonoCliente;
         v.bsuid = id.bsuid;
+        v.botPausado = Boolean(mem.botPausado);
+        v.fallosEntendimiento = Number(mem.fallosEntendimiento) || 0;
         return v;
     }
 
@@ -93,17 +119,13 @@ async function cargar(telefonoBot, telefonoCliente, opts = {}) {
         pendingBooking: data.pending_booking || null,
         pendingReminder: data.pending_reminder || null,
         pendingOwnerAction: data.pending_owner_action || null,
+        botPausado: Boolean(data.bot_pausado ?? mem.botPausado),
+        fallosEntendimiento: Number(data.fallos_entendimiento ?? mem.fallosEntendimiento) || 0,
         bsuid: data.bsuid || id.bsuid || null,
         telefonoCliente: data.telefono_cliente || id.telefonoCliente || null
     };
 }
 
-/**
- * Persiste el estado. Si conv.bsuid existe y no hay teléfono, upsert por BSUID.
- * @param {string} telefonoBot
- * @param {string|null} telefonoCliente
- * @param {object} conv
- */
 async function guardar(telefonoBot, telefonoCliente, conv) {
     if (!conv) return;
 
@@ -121,7 +143,12 @@ async function guardar(telefonoBot, telefonoCliente, conv) {
     conv.telefonoCliente = id.telefonoCliente;
     conv.bsuid = id.bsuid;
 
-    const fila = {
+    pausasMemoria.set(clavePausa(telefonoBot, id), {
+        botPausado: Boolean(conv.botPausado),
+        fallosEntendimiento: Number(conv.fallosEntendimiento) || 0
+    });
+
+    const filaBase = {
         telefono_bot: telefonoBot,
         telefono_cliente: id.telefonoCliente,
         bsuid: id.bsuid,
@@ -133,13 +160,18 @@ async function guardar(telefonoBot, telefonoCliente, conv) {
         pending_owner_action: conv.pendingOwnerAction || null
     };
 
-    let error = null;
+    const filaV11 = {
+        ...filaBase,
+        bot_pausado: Boolean(conv.botPausado),
+        fallos_entendimiento: Number(conv.fallosEntendimiento) || 0
+    };
 
-    if (id.telefonoCliente) {
-        ({ error } = await supabase.from('conversaciones').upsert(fila, {
-            onConflict: 'telefono_bot,telefono_cliente'
-        }));
-    } else {
+    async function upsert(fila) {
+        if (id.telefonoCliente) {
+            return supabase.from('conversaciones').upsert(fila, {
+                onConflict: 'telefono_bot,telefono_cliente'
+            });
+        }
         const { data: existente } = await supabase
             .from('conversaciones')
             .select('id')
@@ -148,10 +180,18 @@ async function guardar(telefonoBot, telefonoCliente, conv) {
             .maybeSingle();
 
         if (existente?.id) {
-            ({ error } = await supabase.from('conversaciones').update(fila).eq('id', existente.id));
-        } else {
-            ({ error } = await supabase.from('conversaciones').insert(fila));
+            return supabase.from('conversaciones').update(fila).eq('id', existente.id);
         }
+        return supabase.from('conversaciones').insert(fila);
+    }
+
+    let { error } = await upsert(columnasV11 === false ? filaBase : filaV11);
+
+    if (error && columnasV11 !== false && /bot_pausado|fallos_entendimiento|schema cache|does not exist/i.test(error.message)) {
+        columnasV11 = false;
+        ({ error } = await upsert(filaBase));
+    } else if (!error && columnasV11 !== false) {
+        columnasV11 = true;
     }
 
     if (error) {
@@ -178,6 +218,8 @@ async function eliminar(telefonoBot, telefonoCliente, opts = {}) {
     if (id.telefonoCliente) query = query.eq('telefono_cliente', id.telefonoCliente);
     else if (id.bsuid) query = query.eq('bsuid', id.bsuid);
     else return;
+
+    pausasMemoria.delete(clavePausa(telefonoBot, id));
 
     const { error } = await query;
     if (error) console.error('Error eliminando conversación:', error.message);

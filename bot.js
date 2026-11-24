@@ -4,6 +4,8 @@ const { createClient } = require('@supabase/supabase-js');
 
 const { enviarMensajeTexto, marcarComoLeido, esBsuid } = require('./whatsappCloud');
 const voz = require('./voz');
+const estiloMod = require('./estilo');
+const memoria = require('./memoria');
 const numeros = require('./numeros');
 const conversaciones = require('./conversaciones');
 const disponibilidad = require('./disponibilidad');
@@ -13,6 +15,7 @@ const agenteDueno = require('./agenteDueno');
 const notificaciones = require('./notificaciones');
 const {
     formatearFechaLarga,
+    formatearFechaCercana,
     formatearFechaCorta,
     hoyEnZona,
     sumarDias,
@@ -82,21 +85,7 @@ function textoServicios(servicios, empresa) {
         .join('\n');
 }
 
-/**
- * Vocabulario por nicho. Barbería por defecto; un consultorio dental
- * cambia profesional_singular a "dentista", etc. (empresas.terminologia).
- */
-const TERMINOLOGIA_DEFAULT = {
-    servicio_singular: 'servicio',
-    servicio_plural: 'servicios',
-    profesional_singular: 'barbero',
-    profesional_plural: 'barberos'
-};
-
-function terminologiaDe(empresa) {
-    const t = (empresa && typeof empresa.terminologia === 'object' && empresa.terminologia) || {};
-    return { ...TERMINOLOGIA_DEFAULT, ...t };
-}
+const terminologiaDe = estiloMod.terminologiaDe;
 
 // ============================================================
 // Utilidades de texto
@@ -111,13 +100,71 @@ function esConfirmacionAfirmativa(texto) {
         .replace(/(?:,\s*)?(?:muchas\s+)?gracias\b/gi, '')
         .replace(/[.!?\s]+$/, '')
         .trim();
-    return /^(s[ií]|claro|adelante|dale|ok|okey|correcto|exacto|confirmo|confirmar|sip|de una|listo|vamos|perfecto|hecho)(?![a-z0-9])([\s,]*(s[ií]|ok|perfecto|claro|de una)(?![a-z0-9]))?[\s.!?]*$/i
+    return /^(s[ií]|claro|adelante|dale|ok|okey|correcto|exacto|confirmo|confirmar|sip|de una|listo|vamos|perfecto|hecho|vale|va|bien)(?![a-z0-9])([\s,]*(s[ií]|ok|perfecto|claro|de una|parce)(?![a-z0-9]))?[\s.!?]*$/i
         .test(t);
 }
 
 function esNegacion(texto) {
     return /^(no|nop|nel|mejor no|ahora no|dejemos|otro d[ií]a|otra fecha|mejor otro)(?![a-z0-9])[\s.!?]*$/i
         .test(String(texto || '').trim());
+}
+
+/** Solo gracias / despedida, sin pedir nada más (no llama tools). */
+function clasificarCortesia(texto) {
+    const t = String(texto || '').trim();
+    if (!t || t.length > 80) return null;
+    if (/^(muchas\s+|mil\s+)?gracias\b/i.test(t) && !/\b(cita|agend|horario|cancel)/i.test(t)) return 'gracias';
+    if (/^(chao|adi[oó]s|hasta luego|nos vemos|bye|hasta pronto|que est[eé]s bien)[.!?¡\s]*$/i.test(t)) return 'despedida';
+    if (/^(perfecto|listo|ok|vale|genial|excelente)[,!]{0,3}\s+(muchas\s+)?gracias([\s.].*)?$/i.test(t)) return 'gracias';
+    if (/^(perfecto|listo|ok)[,!]{0,3}\s+(gracias[,!]{0,3}\s+)?(hasta luego|chao|adi[oó]s|nos vemos).*$/i.test(t)) return 'despedida';
+    return null;
+}
+
+function pideHablarConHumano(texto) {
+    return /\b(asesor|humano|persona|alguien del (equipo|negocio|local)|hablar con (alguien|una persona|un asesor)|atenci[oó]n humana|operador)\b/i
+        .test(String(texto || ''))
+        || /\b(pasame|pásame|pasa me|quiero hablar) con (un |una )?(humano|persona|asesor|alguien)\b/i.test(String(texto || ''));
+}
+
+function preguntaSiEsBot(texto) {
+    return /\b(eres un bot|sos un bot|es un bot|eres (una )?ia|eres (una )?inteligencia|hablando con un bot|sos (un )?robot)\b/i
+        .test(String(texto || ''));
+}
+
+/** El cliente pide explícitamente un día que ya pasó. */
+function pideFechaPasada(texto, zona) {
+    const t = String(texto || '').toLowerCase();
+    if (/\b(ayer|anteayer|el d[ií]a de ayer|la semana pasada|el mes pasado)\b/.test(t)) return true;
+    const m = t.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
+    if (m) {
+        const iso = `${m[1]}-${m[2]}-${m[3]}`;
+        if (esFechaValida(iso) && iso < hoyEnZona(zona)) return true;
+    }
+    return false;
+}
+
+function respuestaFechaPasada(estilo) {
+    const e = estilo || {};
+    if (e.tratamiento === 'usted') {
+        return 'Ese día ya pasó. ¿Le sirve hoy o mañana?';
+    }
+    return '¡Uy, ese día ya pasó! ¿Para hoy o mañana te viene mejor?';
+}
+
+function horasUnicasOfrecidas(pendiente) {
+    const set = new Set();
+    for (const s of pendiente?.slotsOfrecidos || []) {
+        const hora = String(s).split('|')[1];
+        if (hora) set.add(hora);
+    }
+    if (pendiente?.hora) set.add(pendiente.hora);
+    return [...set];
+}
+
+function repreguntarHora(horas) {
+    const lista = horas.slice(0, 4);
+    if (lista.length === 2) return `¿Con cuál: ${lista[0]} o ${lista[1]}?`;
+    return `¿Con cuál: ${lista.join(', ')}?`;
 }
 
 /** El mensaje es apenas un saludo, sin ninguna petición ("hola", "buenas?"). */
@@ -138,8 +185,32 @@ function mensajeEsSoloNombre(texto) {
 /** Aceptación de la oferta sin elegir hora ("sí, la primera", "cualquiera me sirve",
  *  "sí, la más cercana que tenga"). */
 function aceptaLaPrimeraOferta(texto) {
-    return /^(¡|s[ií]|si)(?![a-z0-9])[\s,¡!]*(la\s+|el\s+|lo\s+)?(primera|primero|cualquiera|cualquier|que\s+sea|la\s+que\s+sea|m[aá]s\s+cercana|primera\s+que\s+tenga|que\s+tenga|la\s+que\s+haya|lo\s+que\s+tengan)/i
+    return /^(¡|s[ií]|si|dale|ok|listo)?(?![a-z0-9])?[\s,¡!]*(la\s+|el\s+|lo\s+)?(primera|primero|cualquiera|cualquier|que\s+sea|la\s+que\s+sea|m[aá]s\s+cercana|primera\s+que\s+tenga|que\s+tenga|la\s+que\s+haya|lo\s+que\s+tengan|la\s+que\s+salga)/i
         .test(String(texto || '').trim());
+}
+
+/** El cliente eligió una hora concreta de las ofrecidas ("la de 15:30", "a las 4"). */
+function horaElegidaEnTexto(texto, horasOfrecidas) {
+    const t = String(texto || '').toLowerCase();
+    const concreta = horaConcretaDelTexto(t);
+    if (concreta && horasOfrecidas.includes(concreta)) return concreta;
+
+    for (const h of horasOfrecidas) {
+        const [hh, mm] = h.split(':');
+        const hNum = Number(hh);
+        const variantes = [
+            h,
+            `${hNum}:${mm}`,
+            `${hNum}`,
+            mm === '00' ? `${hNum}` : null
+        ].filter(Boolean);
+        for (const v of variantes) {
+            if (new RegExp(`\\b(a\s+las\s+|las\s+|la\s+de\s+)?${v.replace('.', '\\.')}\\b`).test(t)) {
+                return h;
+            }
+        }
+    }
+    return null;
 }
 
 function limpiarJsonEscapado(texto) {
@@ -216,9 +287,9 @@ const agendarCitaTool = {
                 servicio: { type: 'string', description: 'Nombre exacto del servicio.' },
                 fecha: { type: 'string', description: 'Fecha confirmada en formato AAAA-MM-DD.' },
                 hora: { type: 'string', description: 'Hora confirmada en formato HH:MM (24 horas).' },
-                nombre_cliente: { type: 'string', description: 'Nombre del cliente.' }
+                nombre_cliente: { type: 'string', description: 'Nombre del cliente si ya lo dijo; no inventes uno ni bloquees por no tenerlo.' }
             },
-            required: ['servicio', 'fecha', 'hora', 'nombre_cliente']
+            required: ['servicio', 'fecha', 'hora']
         }
     }
 };
@@ -285,6 +356,15 @@ async function ejecutarVerSlots({ config, args }) {
 
     if (!esFechaValida(fecha)) {
         return { exitoso: false, mensaje: 'No entendí la fecha. Pídela de nuevo.' };
+    }
+
+    const zona = config.empresa.zona_horaria || 'America/Bogota';
+    if (fecha < hoyEnZona(zona)) {
+        return {
+            exitoso: false,
+            fechaPasada: true,
+            mensaje: respuestaFechaPasada(estiloMod.estiloDe(config.empresa))
+        };
     }
 
     const { slots, trabajadores, motivo } = await disponibilidad.obtenerSlots({
@@ -517,7 +597,7 @@ function leerPending(conv) {
     return pendiente;
 }
 
-function guardarPending(conv, { empresaId, servicio, fecha, hora, trabajadorId, slots }) {
+function guardarPending(conv, { empresaId, servicio, fecha, hora, trabajadorId, slots, modoOferta }) {
     conv.pendingBooking = {
         empresaId,
         servicio: servicio.nombre,
@@ -525,6 +605,7 @@ function guardarPending(conv, { empresaId, servicio, fecha, hora, trabajadorId, 
         hora,
         trabajadorId,
         slotsOfrecidos: slots,
+        modoOferta: modoOferta || 'lista',
         creadoEn: Date.now()
     };
 }
@@ -552,35 +633,35 @@ function slotMasCercano(slots, hora) {
 
 function formatearOfertaSlots({ empresa, slots, trabajadores, servicio, fecha }) {
     const multiProfesional = trabajadores.length > 1;
-
-    // Como una recepcionista: se ofrecen hasta 5 opciones, no el día entero
-    // (una lista de 17 horas se lee robótica y abruma). El resto de los
-    // slots sigue vivo en la reserva pendiente, así que agendar una hora
-    // no listada sigue validando igual.
-    const ofrecidos = slots.slice(0, 5);
-
-    // Con más de un profesional libre se muestra quién atiende cada hora.
+    const zona = empresa?.zona_horaria || 'America/Bogota';
+    const ofrecidos = slots.slice(0, 3);
     const lista = ofrecidos
         .map(s => (multiProfesional ? `• ${s.hora} con ${s.trabajador_nombre}` : `• ${s.hora}`))
         .join('\n');
 
-    const encabezado = `Estos son los horarios libres para ${servicio.nombre} el ${formatearFechaLarga(fecha)}:`;
+    const fechaTexto = formatearFechaCercana(fecha, zona);
+    const encabezado = estiloMod.aperturaOferta(servicio.nombre, fechaTexto);
 
-    return `${encabezado}\n${lista}\n\n¿Te aparto alguno o prefieres otra hora?`;
+    return `${encabezado}\n${lista}\n\n¿Te aparto alguno?`;
 }
 
-function respuestaConfirmacion({ empresa, nombreCliente, servicio, fecha, hora, trabajador }) {
-    const plantilla = empresa?.mensaje_confirmacion
-        || '¡Listo {nombre}! Tu cita de {servicio} quedó agendada para el {fecha} a las {hora} con {profesional}. Te esperamos.';
+function respuestaConfirmacion({ empresa, nombreCliente, servicio, fecha, hora, trabajador, pedirNombre }) {
+    const zona = empresa?.zona_horaria || 'America/Bogota';
+    const plantilla = estiloMod.confirmacionEfectiva(empresa);
+    let texto = estiloMod.aplicarConfirmacion(plantilla, {
+        nombreCliente,
+        servicio: servicio?.nombre || 'tu servicio',
+        fecha: formatearFechaCercana(fecha, zona),
+        hora,
+        profesional: trabajador?.nombre || 'nuestro equipo',
+        nombreNegocio: empresa?.nombre || 'nuestro negocio'
+    });
 
-    return plantilla
-        .replace('{nombre}', nombreCliente || '')
-        .replace(' !', '!')
-        .replace('{servicio}', servicio?.nombre || 'tu servicio')
-        .replace('{fecha}', formatearFechaLarga(fecha))
-        .replace('{hora}', hora)
-        .replace('{profesional}', trabajador?.nombre || 'nuestro equipo')
-        .replace('{nombre_negocio}', empresa?.nombre || 'nuestro negocio');
+    if (pedirNombre && !nombreCliente) {
+        texto += ' ¿A nombre de quién la dejo?';
+    }
+
+    return texto;
 }
 
 // ============================================================
@@ -592,7 +673,20 @@ async function procesarToolCall({ nombre, argsCrudos, config, bot, conv, telefon
     const nombreCliente = userName || null;
 
     if (nombre === 'ver_slots') {
-        const resultado = await ejecutarVerSlots({ config, args });
+        let resultado = await ejecutarVerSlots({ config, args });
+
+        const pideProntoTxt = /\b(lo m[aá]s pronto|lo antes|cuanto antes|la m[aá]s cercana)\b/i.test(String(textoCliente || ''));
+        if (resultado.exitoso && resultado.sinHoras && pideProntoTxt) {
+            const zonaP = config.empresa.zona_horaria || 'America/Bogota';
+            const hoyP = hoyEnZona(zonaP);
+            const fechaPedida = normalizarFecha(args.fecha);
+            if (fechaPedida === hoyP) {
+                resultado = await ejecutarVerSlots({
+                    config,
+                    args: { ...args, fecha: sumarDias(hoyP, 1) }
+                });
+            }
+        }
 
         if (resultado.exitoso && resultado.slots.length > 0) {
             const servicio = servicioPorNombre(config.servicios, args.servicio);
@@ -602,48 +696,63 @@ async function procesarToolCall({ nombre, argsCrudos, config, bot, conv, telefon
             // El cliente preguntó por una hora concreta ("¿Tiene a las 09:00?"):
             // se responde sí o no sobre ESA hora, como haría una recepcionista,
             // en vez de volver a soltar la lista entera.
+            const zona = config.empresa.zona_horaria || 'America/Bogota';
+            const fechaTxt = formatearFechaCercana(resultado.fecha, zona);
+            let modoOferta = 'lista';
             const horaPedida = horaConcretaDelTexto(textoCliente);
             if (horaPedida) {
                 const exacto = resultado.slots.find(s => s.hora === horaPedida);
                 if (exacto) {
                     primerSlot = exacto;
-                    respuesta = `Sí, a las ${horaPedida} hay espacio para ${servicio.nombre} el ${formatearFechaLarga(resultado.fecha)}. ¿Te la aparto?`;
+                    modoOferta = 'unica';
+                    respuesta = `Sí, a las ${horaPedida} hay espacio para ${servicio.nombre} ${fechaTxt}. ¿Te la aparto?`;
                 } else {
                     const cercano = slotMasCercano(resultado.slots, horaPedida);
                     if (cercano) {
                         primerSlot = cercano;
-                        respuesta = `A las ${horaPedida} ya está reservada; la más cercana libre ese día es a las ${cercano.hora}. ¿Te la aparto?`;
+                        modoOferta = 'unica';
+                        respuesta = `A las ${horaPedida} ya está reservada; la más cercana libre es a las ${cercano.hora}. ¿Te la aparto?`;
                     }
                 }
             }
 
             if (!respuesta) {
-                respuesta = formatearOfertaSlots({
-                    empresa: config.empresa,
-                    slots: resultado.slots,
-                    trabajadores: resultado.trabajadores,
-                    servicio,
-                    fecha: resultado.fecha
-                });
+                const pidePronto = /\b(lo m[aá]s pronto|lo antes|la m[aá]s cercana|primera que (tenga|haya)|cuanto antes|lo que (tengan|haya))\b/i.test(String(textoCliente || ''));
+                if (pidePronto) {
+                    modoOferta = 'unica';
+                    const zonaP = config.empresa.zona_horaria || 'America/Bogota';
+                    respuesta = `Lo más cercano que tengo es ${formatearFechaCercana(resultado.fecha, zonaP)} a las ${primerSlot.hora}. ¿Te la aparto?`;
+                } else {
+                    respuesta = formatearOfertaSlots({
+                        empresa: config.empresa,
+                        slots: resultado.slots,
+                        trabajadores: resultado.trabajadores,
+                        servicio,
+                        fecha: resultado.fecha
+                    });
+                    modoOferta = 'lista';
+                }
             }
 
-            // La reserva pendiente debe apuntar a la hora que se le ofreció al
-            // cliente (si le respondimos por una hora concreta, a esa), para que
-            // un "sí" posterior agende lo que el cliente cree que aceptó.
+            const slotsParaPending = modoOferta === 'unica'
+                ? [`${primerSlot.trabajador_id}|${primerSlot.hora}`]
+                : resultado.slots.slice(0, 3).map(s => `${s.trabajador_id}|${s.hora}`);
+
             guardarPending(conv, {
                 empresaId: config.empresa.id,
                 servicio,
                 fecha: resultado.fecha,
                 hora: primerSlot.hora,
                 trabajadorId: primerSlot.trabajador_id,
-                slots: resultado.slots.map(s => `${s.trabajador_id}|${s.hora}`)
+                slots: slotsParaPending,
+                modoOferta
             });
 
             return respuesta;
         }
 
-        // Si el motivo es un detalle técnico (calendarios, tokens, base de
-        // datos), el cliente no debe enterarse: se traduce a algo natural.
+        if (resultado.fechaPasada) return resultado.mensaje;
+
         const motivo = String(resultado.mensaje || '');
         const esTecnico = /calendar|calendario|token|panel|base de datos/i.test(motivo);
         return esTecnico
@@ -652,7 +761,6 @@ async function procesarToolCall({ nombre, argsCrudos, config, bot, conv, telefon
     }
 
     if (nombre === 'agendar_cita') {
-        // El cliente puede haber confirmado una hora distinta a la primera ofrecida.
         const pendiente = leerPending(conv);
         const horaPedida = normalizarHora(args.hora);
 
@@ -668,13 +776,23 @@ async function procesarToolCall({ nombre, argsCrudos, config, bot, conv, telefon
 
         if (!resultado.exitoso) return resultado.mensaje;
 
+        memoria.guardar({
+            empresaId: config.empresa.id,
+            telefono: telefonoCliente,
+            bsuid: conv?.bsuid || null,
+            nombre: nombreCliente,
+            servicio: resultado.servicio?.nombre,
+            profesional: resultado.trabajador?.nombre
+        }).catch(() => {});
+
         return respuestaConfirmacion({
             empresa: config.empresa,
             nombreCliente,
             servicio: resultado.servicio,
             fecha: resultado.fecha,
             hora: resultado.hora,
-            trabajador: resultado.trabajador
+            trabajador: resultado.trabajador,
+            pedirNombre: !nombreCliente
         });
     }
 
@@ -697,13 +815,26 @@ async function procesarToolCall({ nombre, argsCrudos, config, bot, conv, telefon
                 fecha: resultado.cita.fecha,
                 hora: resultado.cita.hora
             };
+            memoria.guardar({
+                empresaId: config.empresa.id,
+                telefono: telefonoCliente,
+                bsuid: conv?.bsuid || null,
+                nombre: nombreCliente,
+                servicio: resultado.cita.nombre_servicio,
+                profesional: resultado.cita.trabajadores?.nombre || null
+            }).catch(() => {});
         }
 
+        const zonaMod = config.empresa.zona_horaria || 'America/Bogota';
+        const fechaMov = formatearFechaCercana(resultado.cita.fecha, zonaMod);
+        const fechaMovTxt = fechaMov.startsWith('el ') ? `al ${fechaMov.slice(3)}` : fechaMov;
         return resultado.exitoso
-            ? `Perfecto${nombreCliente ? ` ${nombreCliente}` : ''}, tu cita se movió al ${formatearFechaLarga(resultado.cita.fecha)} a las ${resultado.cita.hora}.`
+            ? `Listo${nombreCliente ? ` ${nombreCliente}` : ''}, tu cita se movió ${fechaMovTxt} a las ${resultado.cita.hora}.`
             : `No pude moverla: ${resultado.mensaje}`;
+
     }
 
+    conv.fallosEntendimiento = (conv.fallosEntendimiento || 0) + 1;
     return 'No pude entender eso. ¿Me lo repites?';
 }
 
@@ -792,43 +923,42 @@ function construirPrompt({ config, conv, userName, zona }) {
         : 'El cliente no tiene ninguna cita activa.';
 
     const pendiente = conv.pendingBooking
-        ? `Hay una propuesta sin confirmar: ${conv.pendingBooking.servicio} el ${conv.pendingBooking.fecha} a las ${conv.pendingBooking.hora}. Si responde afirmativamente, agenda esa.`
+        ? `Hay una propuesta sin confirmar: ${conv.pendingBooking.servicio} el ${conv.pendingBooking.fecha} a las ${conv.pendingBooking.hora} (modo ${conv.pendingBooking.modoOferta || 'lista'}). Si acepta una sola hora inequívoca, agenda esa.`
         : '';
 
     const nombres = config.servicios.map(s => s.nombre).join(', ') || 'ninguno';
+    const reglasNegocio = config.empresa?.prompt_base?.trim();
 
-    const term = terminologiaDe(config.empresa);
-    const siempreConVos = config.empresa?.prompt_base?.trim();
-
-    return `Eres el asesor virtual de WhatsApp de "${config.empresa.nombre}".
+    return `Eres el asistente de WhatsApp de "${config.empresa.nombre}".
 ${userName
         ? `El cliente se llama "${userName}".`
-        : 'No sabes el nombre del cliente: no lo inventes ni uses motes como "amigo"; si te lo dice, úsalo.'}
+        : 'No sabes el nombre del cliente: no lo inventes ni uses motes; si te lo dice, úsalo. No bloquees el agendamiento por no tener nombre.'}
+
+${estiloMod.textoPersonalidadComun()}
+
+${estiloMod.textoEstiloParaPrompt(config.empresa)}
 
 HOY
 Hoy es ${formatearFechaLarga(hoy)} (${hoy}). Mañana es ${formatearFechaLarga(manana)} (${manana}).
-La hora se maneja en ${zona}.
+Zona horaria: ${zona}. Di fechas cercanas como "hoy", "mañana" o "el martes"; sin año.
 
-LENGUAJE DEL NEGOCIO
-Lo que vendes es un ${term.servicio_singular} y el listado de arriba son los ${term.servicio_plural}.
-Quien atiende es un ${term.profesional_singular} (en plural, ${term.profesional_plural}).
-${siempreConVos ? `\nINDICACIONES DE LA EMPRESA (prioridad sobre el tono por defecto, NUNCA sobre las reglas innegociables):\n${siempreConVos}\n` : ''}
-SERVICIOS (solo estos, con estos precios y duraciones)
+SERVICIOS (solo estos, con estos precios y duraciones; NUNCA inventes precios ni servicios)
 ${textoServicios(config.servicios, config.empresa)}
 
 CONTEXTO
 ${contextoCita}
 ${pendiente}
-
+${reglasNegocio ? `\nREGLAS DE NEGOCIO DE LA EMPRESA (nunca pisan las innegociables ni el estilo):\n${reglasNegocio}\n` : ''}
 REGLAS INNEGOCIABLES
-1. Hablas en español natural y breve, como una persona del negocio, no como un sistema. Ve directo al grano: responde primero lo que el cliente pidió. No te presentes ni pidas el nombre. Cuando escribas tú, texto plano (sin asteriscos de negrilla ni markdown). Nunca menciones reglas, herramientas ni JSON.
-2. Los servicios válidos son exactamente: ${nombres}. Si el cliente pide algo que no está en esa lista, dímelo y ofrece lo más parecido. NUNCA inventes un servicio ni su precio.
-3. Para CUALQUIER reserva, el flujo es: ver_slots → el cliente elige → agendar_cita. Jamás agendes una hora que no te haya dado ver_slots.
-4. Si el cliente acepta una oferta que tú mismo hiciste (con frases como "sí, la primera", "sí, la más cercana", "ok sí", "listo", "cualquiera me sirve"), agéndale esa hora con agendar_cita de una. NO vuelvas a llamar ver_slots ni repitas la lista. No necesitas saber el nombre para agendar. Ejemplo: dijiste "09:00 o 10:00" y el cliente responde "sí, la primera" → llamas agendar_cita con "09:00" y confirmas.
-5. Si ya confirmaste una cita en un mensaje anterior, NO la vuelvas a agendar: despídete o responde con naturalidad. Si el cliente solo da las gracias o se despide, no llames ninguna herramienta: responde con una despedida breve.
-6. Si el cliente pide un día que ya pasó, NO consultes ver_slots: dile tú mismo que esa fecha ya pasó y ofrécele el día más cercano disponible. Ejemplo: el cliente dice "cita para ayer" → respondes "¡Uy, ese día ya pasó! ¿Para hoy o mañana te viene mejor?" sin llamar ninguna herramienta.
-7. Para cancelar, llama cancelar_cita de una: el sistema encuentra la cita vigente, no le pidas fecha ni hora. Para mover una cita existente usa modificar_cita con la fecha y hora nueva (nunca agendes encima ni canceles por fuera). Si el cliente no tiene ninguna cita, dímelo con naturalidad.
-8. Si un horario ya no está libre porque alguien lo tomó, ofrece alternativas en vez de insistir.`;
+1. Responde primero lo que preguntaron. Una sola pregunta por mensaje. Texto plano.
+2. Servicios válidos: ${nombres}. Si pide algo fuera de la lista, dilo y ofrece lo más parecido. Nunca inventes precio.
+3. Flujo de reserva: ver_slots → el cliente elige → agendar_cita. Jamás agendes una hora que no vino de ver_slots.
+4. Si hay una sola hora pendiente y el cliente acepta, agéndala sin relistar. Si ofresciste varias y responde ambiguo ("ok sí"), pregunta cuál. No hace falta el nombre para agendar.
+5. Tras confirmar, no reagendes. Gracias o despedida: sin herramientas, respuesta breve.
+6. Fecha pasada: no llames ver_slots; el sistema ya la corta. Ofrece hoy o mañana.
+7. Cancelar → cancelar_cita. Mover cita existente → modificar_cita (nunca agendar encima).
+8. Si preguntan si eres un bot, dilo con honestidad: eres el asistente virtual del negocio.
+9. Si piden hablar con una persona, indícalo; el sistema avisará al dueño.`;
 }
 
 // ============================================================
@@ -958,27 +1088,33 @@ async function procesarMensajeWhatsapp({ telefonoBot, phoneNumberId, telefonoCli
         }
 
         // ── Modo cliente ──────────────────────────────────────
-        const esPrimera = conversaciones.esPrimeraConversacion({
-            userName: conv.userName,
-            mensajes: conv.mensajes.slice(0, -1)
-        });
+        if (conv.botPausado) {
+            console.log(`⏸️  Bot pausado en chat ${destinoEnvio}; mensaje ignorado.`);
+            return;
+        }
 
-        // El saludo de bienvenida SOLO cuando el cliente apenas está saludando.
-        // Si trae una petición ("quería una cita..."), el modelo responde de una:
-        // como una recepcionista real, que no interrumpe con "¿cómo te llamas?".
-        if (esPrimera && mensajeEsSoloSaludo(texto)) {
-            const saludo = (cfg.empresa.mensaje_bienvenida
-                || '¡Hola! 👋 Bienvenido a {nombre_negocio}. ¿En qué te puedo ayudar?')
-                .replace('{nombre_negocio}', cfg.empresa.nombre);
+        const estiloEmp = estiloMod.estiloDe(cfg.empresa);
 
-            await enviar(saludo);
+        if (preguntaSiEsBot(texto)) {
+            await enviar(estiloMod.respuestaEresUnBot(cfg.empresa));
             await persistir();
             return;
         }
 
-        // El nombre se captura ANTES de decidir la respuesta: si el mensaje trae
-        // nombre y petición ("soy Laura, quería cita mañana"), el prompt ya conoce
-        // el nombre y el modelo responde todo en un solo mensaje.
+        if (pideHablarConHumano(texto)) {
+            conv.botPausado = true;
+            notificaciones.avisarDueno({
+                empresa: cfg.empresa,
+                tipo: 'escalamiento',
+                texto: `🙋 ${conv.userName || tel || destinoEnvio} pide hablar con una persona.`
+            }).catch(() => {});
+            await enviar(estiloEmp.tratamiento === 'usted'
+                ? 'Claro, ya avisé al equipo para que le escriban por aquí.'
+                : 'Claro, ya avisé al equipo para que te escriban por aquí.');
+            await persistir();
+            return;
+        }
+
         let nombreRecien = false;
         if (!conv.userName) {
             const nombre = await extraerNombre(texto);
@@ -988,9 +1124,43 @@ async function procesarMensajeWhatsapp({ telefonoBot, phoneNumberId, telefonoCli
             }
         }
 
+        if (pideFechaPasada(texto, zona)) {
+            await enviar(respuestaFechaPasada(estiloEmp));
+            await persistir();
+            return;
+        }
+
+        const esPrimera = conversaciones.esPrimeraConversacion({
+            userName: conv.userName,
+            mensajes: conv.mensajes.slice(0, -1)
+        });
+
+        if (esPrimera && mensajeEsSoloSaludo(texto)) {
+            let saludo = null;
+            const mem = await memoria.obtener({
+                empresaId: cfg.empresa.id,
+                telefono: tel,
+                bsuid: conv.bsuid || null
+            });
+            if (mem?.nombre) {
+                if (!conv.userName) conv.userName = mem.nombre;
+                saludo = memoria.saludoRecurrente({
+                    estilo: estiloEmp,
+                    nombre: mem.nombre,
+                    servicio: mem.ultimo_servicio,
+                    profesional: mem.ultimo_profesional,
+                    tratamiento: estiloEmp.tratamiento
+                });
+            }
+            if (!saludo) saludo = estiloMod.saludoEfectivo(cfg.empresa);
+
+            await enviar(saludo);
+            await persistir();
+            return;
+        }
+
         const userName = conv.userName || null;
 
-        // Contestó solo el nombre a la pregunta de bienvenida → saludo corto.
         if (nombreRecien && mensajeEsSoloNombre(texto)) {
             await enviar(`¡Mucho gusto, ${conv.userName}! ¿En qué te ayudo hoy?`);
             await persistir();
@@ -1012,41 +1182,74 @@ async function procesarMensajeWhatsapp({ telefonoBot, phoneNumberId, telefonoCli
 
         const pendiente = leerPending(conv);
 
-        if (pendiente && (esConfirmacionAfirmativa(texto) || aceptaLaPrimeraOferta(texto)) && !esNegacion(texto)) {
-            // Si el cliente ya tiene cita vigente y la oferta pendiente es para
-            // otra fecha u hora, no es una reserva nueva: es un movimiento.
-            // Antes se agendaba encima y el cliente terminaba con dos citas.
-            let mover = false;
-            if (conv.ultimaCita
-                && (conv.ultimaCita.fecha !== pendiente.fecha || conv.ultimaCita.hora !== pendiente.hora)) {
-                const vigente = await calendar.citaVigente({
-                    empresa: cfg.empresa,
-                    telefonoCliente: tel,
-                    bsuid: conv?.bsuid || null
-                });
-                mover = Boolean(vigente)
-                    && (vigente.fecha !== pendiente.fecha || vigente.hora !== pendiente.hora);
-            }
-
-            const respuesta = await procesarToolCall({
-                nombre: mover ? 'modificar_cita' : 'agendar_cita',
-                argsCrudos: mover
-                    ? { nueva_fecha: pendiente.fecha, nueva_hora: pendiente.hora }
-                    : { hora: pendiente.hora },
-                config: cfg,
-                conv,
-                telefonoCliente: tel,
-                userName,
-                textoCliente: texto
-            });
-            await enviar(respuesta);
+        const cortesia = !pendiente ? clasificarCortesia(texto) : null;
+        if (cortesia === 'gracias') {
+            await enviar(estiloMod.respuestaGracias());
+            await persistir();
+            return;
+        }
+        if (cortesia === 'despedida') {
+            await enviar(estiloMod.respuestaDespedida());
             await persistir();
             return;
         }
 
+        if (pendiente && !esNegacion(texto)) {
+            const horas = horasUnicasOfrecidas(pendiente);
+            const horaElegida = horaElegidaEnTexto(texto, horas);
+            const aceptaPrimera = aceptaLaPrimeraOferta(texto);
+            const afirmativa = esConfirmacionAfirmativa(texto);
+            const ofertaUnica = pendiente.modoOferta === 'unica' || horas.length <= 1;
+
+            if (horaElegida || aceptaPrimera || (afirmativa && ofertaUnica)) {
+                if (horaElegida) {
+                    const elegido = pendiente.slotsOfrecidos?.find(s => s.endsWith(`|${horaElegida}`));
+                    if (elegido) {
+                        pendiente.hora = horaElegida;
+                        pendiente.trabajadorId = elegido.split('|')[0];
+                    } else {
+                        pendiente.hora = horaElegida;
+                    }
+                }
+
+                let mover = false;
+                if (conv.ultimaCita
+                    && (conv.ultimaCita.fecha !== pendiente.fecha || conv.ultimaCita.hora !== pendiente.hora)) {
+                    const vigente = await calendar.citaVigente({
+                        empresa: cfg.empresa,
+                        telefonoCliente: tel,
+                        bsuid: conv?.bsuid || null
+                    });
+                    mover = Boolean(vigente)
+                        && (vigente.fecha !== pendiente.fecha || vigente.hora !== pendiente.hora);
+                }
+
+                const respuesta = await procesarToolCall({
+                    nombre: mover ? 'modificar_cita' : 'agendar_cita',
+                    argsCrudos: mover
+                        ? { nueva_fecha: pendiente.fecha, nueva_hora: pendiente.hora }
+                        : { hora: pendiente.hora },
+                    config: cfg,
+                    conv,
+                    telefonoCliente: tel,
+                    userName,
+                    textoCliente: texto
+                });
+                await enviar(respuesta);
+                await persistir();
+                return;
+            }
+
+            if (afirmativa && !ofertaUnica) {
+                await enviar(repreguntarHora(horas));
+                await persistir();
+                return;
+            }
+        }
+
         if (pendiente && esNegacion(texto)) {
             conv.pendingBooking = null;
-            await enviar('Perfecto, no te aparto nada. ¿Buscamos otro horario?');
+            await enviar('Va, no te aparto nada. ¿Buscamos otro horario?');
             await persistir();
             return;
         }
@@ -1080,11 +1283,27 @@ async function procesarMensajeWhatsapp({ telefonoBot, phoneNumberId, telefonoCli
                 userName,
                 textoCliente: texto
             });
+            conv.fallosEntendimiento = 0;
         } else {
             respuestaFinal = limpiarTexto(salida.content);
-            if (!respuestaFinal) {
-                respuestaFinal = '¿Me lo repites?';
+            if (!respuestaFinal || /no (pude|logré) entender|me lo repites/i.test(respuestaFinal)) {
+                conv.fallosEntendimiento = (conv.fallosEntendimiento || 0) + 1;
+                if (!respuestaFinal) respuestaFinal = '¿Me lo repites?';
+            } else {
+                conv.fallosEntendimiento = 0;
             }
+        }
+
+        if ((conv.fallosEntendimiento || 0) >= 2) {
+            conv.botPausado = true;
+            notificaciones.avisarDueno({
+                empresa: cfg.empresa,
+                tipo: 'escalamiento',
+                texto: `⚠️ ${userName || tel || destinoEnvio}: el bot no entendió 2 veces seguidas.`
+            }).catch(() => {});
+            respuestaFinal = estiloEmp.tratamiento === 'usted'
+                ? 'Disculpe, mejor le paso con alguien del equipo. Ya les avisé.'
+                : 'Uy, mejor te paso con alguien del equipo. Ya les avisé.';
         }
 
         await enviar(respuestaFinal);

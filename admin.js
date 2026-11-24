@@ -614,7 +614,7 @@ const CAMPOS_EMPRESA = [
     'zona_horaria', 'horario', 'slot_minutos',
     'mensaje_bienvenida', 'mensaje_confirmacion',
     'logo_url', 'color_primario', 'moneda',
-    'terminologia', 'prompt_base', 'politicas'
+    'terminologia', 'prompt_base', 'politicas', 'estilo'
 ];
 
 /** Clave temporal para el usuario de una empresa nueva. */
