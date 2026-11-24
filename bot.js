@@ -32,6 +32,29 @@ const TTL_PENDING_MS = 30 * 60 * 1000;
 
 const MODELO = 'openai/gpt-oss-120b';
 
+function dormir(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function llamarGroq(params, { intentos = 4 } = {}) {
+    let ultimo = null;
+    for (let i = 0; i < intentos; i++) {
+        try {
+            return await groq.chat.completions.create(params);
+        } catch (e) {
+            ultimo = e;
+            const status = e?.status || e?.statusCode;
+            const retriable = status === 429 || status === 503 || status === 502;
+            if (!retriable || i === intentos - 1) throw e;
+            const retryAfter = Number(e?.headers?.['retry-after'] || 0);
+            const esperaMs = Math.max(retryAfter * 1000, Math.min(90_000, 2000 * (2 ** i)));
+            console.warn(`⚠️  Groq ${status}: reintento ${i + 1}/${intentos - 1} en ${Math.round(esperaMs / 1000)}s`);
+            await dormir(esperaMs);
+        }
+    }
+    throw ultimo;
+}
+
 const CACHE_TTL_MS = 5 * 60 * 1000;
 let configCache = new Map();
 
@@ -63,6 +86,21 @@ async function cargarConfiguracion(empresaId) {
 
 function limpiarCacheConfiguracion() {
     configCache = new Map();
+}
+
+/** Para harness: fuerza estilo/terminología en caché sin exigir columnas nuevas en DB. */
+async function sembrarConfigConOverrides(empresaId, overrides = {}) {
+    const cfg = await cargarConfiguracion(empresaId);
+    if (cfg.empresa) {
+        if (overrides.estilo && typeof overrides.estilo === 'object') {
+            cfg.empresa.estilo = { ...(cfg.empresa.estilo || {}), ...overrides.estilo };
+        }
+        if (overrides.terminologia && typeof overrides.terminologia === 'object') {
+            cfg.empresa.terminologia = { ...(cfg.empresa.terminologia || {}), ...overrides.terminologia };
+        }
+    }
+    configCache.set(empresaId, { valor: cfg, expiresAt: Date.now() + 60 * 60 * 1000 });
+    return cfg;
 }
 
 /** Formatea un precio en la moneda de la empresa (default COP). */
@@ -1084,7 +1122,7 @@ async function procesarMensajeWhatsapp({ telefonoBot, phoneNumberId, telefonoCli
                 ...conv.mensajes.map(m => ({ role: m.role, content: m.content }))
             ];
 
-            const response = await groq.chat.completions.create({
+            const response = await llamarGroq({
                 model: MODELO,
                 messages: mensajes,
                 tools: agenteDueno.TOOLS_DUENO,
@@ -1314,7 +1352,7 @@ async function procesarMensajeWhatsapp({ telefonoBot, phoneNumberId, telefonoCli
             ...conv.mensajes.map(m => ({ role: m.role, content: m.content }))
         ];
 
-        const response = await groq.chat.completions.create({
+        const response = await llamarGroq({
             model: MODELO,
             messages: mensajes,
             tools: TOOLS,
@@ -1387,7 +1425,7 @@ async function resolverEmpresaId(telefonoBot, phoneNumberId) {
 
 async function extraerNombre(texto) {
     try {
-        const response = await groq.chat.completions.create({
+        const response = await llamarGroq({
             model: MODELO,
             temperature: 0,
             messages: [
@@ -1451,4 +1489,4 @@ async function iniciar() {
     }
 }
 
-module.exports = { iniciar, procesarMensajeWhatsapp, limpiarCacheConfiguracion };
+module.exports = { iniciar, procesarMensajeWhatsapp, limpiarCacheConfiguracion, sembrarConfigConOverrides };

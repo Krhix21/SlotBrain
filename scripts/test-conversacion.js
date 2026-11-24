@@ -13,8 +13,9 @@
 //
 // Uso:
 //   node scripts/test-conversacion.js --set ajuste --sin-juez --reporte
-//   node scripts/test-conversacion.js --set validacion --corridas 3 --sin-juez --reporte
+//   node scripts/test-conversacion.js --set validacion --corridas 3 --nichos --sin-juez --reporte
 //   node scripts/test-conversacion.js --sin-juez          # sin juez LLM (el agente humano juzga después)
+//   node scripts/test-conversacion.js --nichos            # 3 estilos: clínica formal / barbería casual / spa
 //   node scripts/test-conversacion.js --dejar             # NO borra citas/conversaciones de prueba
 //   node scripts/test-conversacion.js --empresa "Otra"    # otra empresa (nunca una con calendario real)
 //
@@ -128,6 +129,7 @@ function chequearRespuesta(texto, memoria) {
     const fallos = [];
 
     if (!texto || !texto.trim()) return ['respuesta vacía'];
+    if (/problemas t[eé]cnicos/i.test(texto)) fallos.push('respuesta de fallo técnico (posible rate limit)');
     if (texto.length > 400) fallos.push(`demasiado larga (${texto.length} caracteres)`);
 
     // Una sola pregunta por mensaje (salvo oferta + pedir nombre).
@@ -270,7 +272,8 @@ function escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, con
     lineas.push('');
     lineas.push(`- Corrida: ${fecha} (hora Bogotá)`);
     lineas.push(`- Empresa: ${empresa.nombre}`);
-    lineas.push(`- Escenario: un día normal de agendamiento por WhatsApp (6 conversaciones, servicio "${servicio.nombre}").`);
+    lineas.push(`- Set: ${SET} | Corridas: ${CORRIDAS}${CON_NICHOS ? ' | Nichos: clinica-formal, barberia-casual, spa-neutro' : ''}.`);
+    lineas.push(`- Servicio: "${servicio.nombre}". Conversaciones en el informe: ${resultados.length}.`);
     lineas.push(`- Días reales usados en los guiones: ${fechaLarga(dia1.fecha)} y ${fechaLarga(dia2.fecha)}.`);
     if (media) lineas.push(`- Naturalidad media del juez: ${media}/10 sobre ${conNota} respuestas.`);
     else if (!CON_JUEZ) lineas.push('- Juez: externo al proceso (modelo distinto al del bot); las notas se asignan después de la corrida.');
@@ -302,7 +305,10 @@ function escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, con
     lineas.push('');
 
     resultados.forEach((r, i) => {
-        lineas.push(`## ${i + 1}. ${r.nombre}`);
+        const meta = (r.nicho || r.corrida)
+            ? ` [${r.nicho || 'default'} · corrida ${r.corrida || 1}]`
+            : '';
+        lineas.push(`## ${i + 1}. ${r.nombre}${meta}`);
         lineas.push('');
         for (const l of r.lineas) {
             lineas.push(`**Cliente:** ${l.paso}`);
@@ -330,16 +336,50 @@ function escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, con
 (async () => {
     const telefonosFalsos = [];
     const datos = { telefonoBot: BOT_PRUEBA.telefono, phoneNumberId: BOT_PRUEBA.phone_number_id };
+    let empresa = null;
+    let estiloOriginal = null;
+    let termOriginal = null;
+    const progresoPath = path.join(
+        process.env.TEMP || process.env.TMP || path.join(process.env.LOCALAPPDATA || '.', 'Temp'),
+        'opencode',
+        'validacion-progreso.txt'
+    );
+    const marcarProgreso = (linea) => {
+        try {
+            require('fs').appendFileSync(progresoPath, `${new Date().toISOString()} ${linea}\n`, 'utf8');
+        } catch (_) {}
+        try { console.log(linea); } catch (_) {}
+    };
 
     try {
+        try {
+            require('fs').mkdirSync(path.dirname(progresoPath), { recursive: true });
+            require('fs').writeFileSync(progresoPath, '', 'utf8');
+        } catch (_) {}
+
         // 1) Empresa destino (nunca una con calendario real).
-        const { data: empresa, error: eEmpresa } = await supabase
+        const { data: empresaData, error: eEmpresa } = await supabase
             .from('empresas').select('*').ilike('nombre', NOMBRE_EMPRESA).maybeSingle();
         if (eEmpresa) throw new Error('No pude leer la empresa: ' + eEmpresa.message);
-        if (!empresa) throw new Error(`No existe la empresa "${NOMBRE_EMPRESA}".`);
-        if (!FORZAR && /xheros/i.test(empresa.nombre)) {
+        if (!empresaData) throw new Error(`No existe la empresa "${NOMBRE_EMPRESA}".`);
+        if (!FORZAR && /xheros/i.test(empresaData.nombre)) {
             throw new Error('Xheros tiene calendario real: no se usa para pruebas. Usa la clínica de prueba.');
         }
+        empresa = empresaData;
+        estiloOriginal = empresa.estilo || {};
+        termOriginal = empresa.terminologia || {};
+
+        // Limpia restos de corridas cortadas (teléfonos 5799… del harness).
+        const { data: huérfanas } = await supabase
+            .from('citas').select('telefono_cliente').like('telefono_cliente', '5799%').limit(1000);
+        const telsHuérfanos = [...new Set((huérfanas || []).map(r => r.telefono_cliente).filter(Boolean))];
+        if (telsHuérfanos.length) {
+            await supabase.from('citas').delete().in('telefono_cliente', telsHuérfanos);
+            await supabase.from('conversaciones').delete().in('telefono_cliente', telsHuérfanos);
+            marcarProgreso(`Limpieza previa: ${telsHuérfanos.length} teléfonos 5799…`);
+        }
+        await supabase.from('numeros_bot').delete().eq('phone_number_id', BOT_PRUEBA.phone_number_id);
+
         tiempo.setAhoraSimulado(RELOJ_ISO);
         console.log(`Empresa: ${empresa.nombre}`);
         console.log(`Reloj simulado: ${RELOJ_ISO} (${tiempo.hoyEnZona(empresa.zona_horaria || 'America/Bogota')} ${tiempo.horaAhoraEnZona(empresa.zona_horaria || 'America/Bogota')})`);
@@ -355,7 +395,25 @@ function escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, con
         const { data: trabajadoresPrueba } = await supabase
             .from('trabajadores').select('nombre').eq('empresa_id', empresa.id).eq('activo', true).limit(1);
         const profesionalNombre = trabajadoresPrueba?.[0]?.nombre || null;
-        console.log(`Set: ${SET} | Corridas: ${CORRIDAS}`);
+        console.log(`Set: ${SET} | Corridas: ${CORRIDAS}${CON_NICHOS ? ' | Nichos: 3' : ''}`);
+
+        const NICHOS = CON_NICHOS ? [
+            {
+                id: 'clinica-formal',
+                estilo: { tratamiento: 'usted', tono: 'formal', emojis: 'pocos', vocabulario_cita: 'cita' },
+                terminologia: { profesional_singular: 'doctora', profesional_plural: 'doctoras', servicio_singular: 'servicio', servicio_plural: 'servicios' }
+            },
+            {
+                id: 'barberia-casual',
+                estilo: { tratamiento: 'tu', tono: 'casual', emojis: 'normal', vocabulario_cita: 'cita' },
+                terminologia: { profesional_singular: 'barbero', profesional_plural: 'barberos', servicio_singular: 'servicio', servicio_plural: 'servicios' }
+            },
+            {
+                id: 'spa-neutro',
+                estilo: { tratamiento: 'usted', tono: 'neutro', emojis: 'pocos', vocabulario_cita: 'reserva' },
+                terminologia: { profesional_singular: 'especialista', profesional_plural: 'especialistas', servicio_singular: 'servicio', servicio_plural: 'servicios' }
+            }
+        ] : [{ id: 'default', estilo: null, terminologia: null }];
 
         // 3) Número de bot de prueba (fila inerte; se borra al final).
         let { data: filaBot } = await supabase
@@ -388,8 +446,24 @@ function escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, con
         let conNota = 0;
 
         const resultadosTodas = [];
+        for (const nicho of NICHOS) {
+        if (nicho.estilo) {
+            // terminologia ya existe en DB; estilo llega con v11 — mientras tanto se siembra en caché.
+            const { error: eTerm } = await supabase
+                .from('empresas')
+                .update({ terminologia: nicho.terminologia })
+                .eq('id', empresa.id);
+            if (eTerm) console.warn('No pude aplicar terminologia de nicho:', eTerm.message);
+            bot.limpiarCacheConfiguracion();
+            await bot.sembrarConfigConOverrides(empresa.id, {
+                estilo: nicho.estilo,
+                terminologia: nicho.terminologia
+            });
+            Object.assign(empresa, { estilo: nicho.estilo, terminologia: nicho.terminologia });
+            console.log(`\n### Nicho: ${nicho.id}`);
+        }
         for (let corrida = 1; corrida <= CORRIDAS; corrida++) {
-        if (CORRIDAS > 1) console.log(`\n### Corrida ${corrida}/${CORRIDAS}`);
+        if (CORRIDAS > 1 || CON_NICHOS) console.log(`\n### Corrida ${corrida}/${CORRIDAS} · ${nicho.id}`);
         for (const conv of guion) {
             const telefono = telefonoFalso();
             telefonosFalsos.push(telefono);
@@ -398,10 +472,13 @@ function escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, con
             let fallosConv = 0;
 
             console.log('─'.repeat(70));
-            console.log(`CONVERSACIÓN: ${conv.nombre}  (cliente de prueba ${telefono})`);
+            console.log(`CONVERSACIÓN: ${conv.nombre}  [${nicho.id} · corrida ${corrida}]  (cliente de prueba ${telefono})`);
             console.log('─'.repeat(70));
 
             for (const paso of conv.pasos) {
+                if (CORRIDAS > 1 || CON_NICHOS) {
+                    await new Promise(r => setTimeout(r, 400));
+                }
                 const antes = enviados.length;
                 await bot.procesarMensajeWhatsapp({
                     telefonoBot: datos.telefonoBot,
@@ -452,17 +529,30 @@ function escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, con
                     console.log('  REGLAS  : espera_cita: no quedó registro de cita');
                 }
             }
-            resultados.push({ nombre: conv.nombre, telefono, lineas, fallos: fallosConv });
+            resultados.push({ nombre: conv.nombre, nicho: nicho.id, corrida, telefono, lineas, fallos: fallosConv });
+            resultadosTodas.push({ nombre: conv.nombre, nicho: nicho.id, corrida, fallos: fallosConv });
+            marcarProgreso(`[${nicho.id} c${corrida}] ${conv.nombre}: ${fallosConv ? fallosConv + ' fallos' : 'OK'} (${resultadosTodas.length} hechas)`);
         }
 
         } // fin corridas
+        } // fin nichos
 
         // 6) Resumen final.
         console.log('='.repeat(70));
         console.log('RESUMEN');
         console.log('='.repeat(70));
         for (const r of resultados) {
-            console.log(`  ${r.fallos ? '[OJO]' : '[OK ]'} ${r.nombre}: ${r.lineas.length} respuestas${r.fallos ? `, ${r.fallos} con observaciones` : ''}`);
+            const etiqueta = (CON_NICHOS || CORRIDAS > 1)
+                ? `${r.nombre} [${r.nicho || 'default'} · c${r.corrida || 1}]`
+                : r.nombre;
+            console.log(`  ${r.fallos ? '[OJO]' : '[OK ]'} ${etiqueta}: ${r.lineas.length} respuestas${r.fallos ? `, ${r.fallos} con observaciones` : ''}`);
+        }
+        if (resultadosTodas.length) {
+            const fallaronAlguna = [...new Set(
+                resultadosTodas.filter(r => r.fallos > 0).map(r => `${r.nombre} (${r.nicho})`)
+            )];
+            console.log(`\n  Escenarios que fallaron en alguna corrida/nicho: ${fallaronAlguna.length}`);
+            for (const n of fallaronAlguna) console.log(`    - ${n}`);
         }
         const media = conNota ? (sumaNotas / conNota).toFixed(1) : null;
         if (media) console.log(`\n  Naturalidad media (juez): ${media}/10 sobre ${conNota} respuestas.`);
@@ -479,6 +569,14 @@ function escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, con
         process.exitCode = 1;
     } finally {
         try { tiempo.limpiarAhoraSimulado(); } catch (_) {}
+        try {
+            if (CON_NICHOS && empresa && termOriginal != null) {
+                await supabase.from('empresas')
+                    .update({ terminologia: termOriginal })
+                    .eq('id', empresa.id);
+                bot.limpiarCacheConfiguracion();
+            }
+        } catch (_) {}
         if (!DEJAR_DATOS) {
             // Limpieza: citas, conversaciones y el número de prueba.
             if (telefonosFalsos.length) {
