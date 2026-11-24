@@ -12,9 +12,9 @@
 // el texto del bot).
 //
 // Uso:
-//   node scripts/test-conversacion.js                     # corrida completa con juez de naturalidad
-//   node scripts/test-conversacion.js --sin-juez          # sin evaluar naturalidad (más rápido)
-//   node scripts/test-conversacion.js --reporte           # además escribe docs/INFORME-CONVERSACIONES.md
+//   node scripts/test-conversacion.js --set ajuste --sin-juez --reporte
+//   node scripts/test-conversacion.js --set validacion --corridas 3 --sin-juez --reporte
+//   node scripts/test-conversacion.js --sin-juez          # sin juez LLM (el agente humano juzga después)
 //   node scripts/test-conversacion.js --dejar             # NO borra citas/conversaciones de prueba
 //   node scripts/test-conversacion.js --empresa "Otra"    # otra empresa (nunca una con calendario real)
 //
@@ -50,6 +50,8 @@ wa.marcarComoLeido = async () => null;
 // Recién ahora cargamos el bot (con el envío ya interceptado).
 const bot = require(path.join(__dirname, '..', 'bot'));
 const disponibilidad = require(path.join(__dirname, '..', 'disponibilidad'));
+const { escenariosAjuste } = require('./escenarios-ajuste');
+const { escenariosValidacion } = require('./escenarios-validacion');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
@@ -67,6 +69,9 @@ const CON_JUEZ = !opt('--sin-juez');
 const DEJAR_DATOS = opt('--dejar'); // para depurar: no borra nada al final
 const CON_REPORTE = opt('--reporte'); // además escribe docs/INFORME-CONVERSACIONES.md
 const FORZAR = opt('--forzar');
+const SET = (valorDe('--set') || 'ajuste').toLowerCase();
+const CORRIDAS = Math.max(1, Number(valorDe('--corridas') || 1));
+const CON_NICHOS = opt('--nichos');
 
 // Número de bot de prueba: una fila inerte en numeros_bot (Meta jamás
 // manda webhooks con este id, es solo para rutear la empresa en local).
@@ -156,6 +161,39 @@ function chequearRespuesta(texto, memoria) {
 }
 
 // ── Juez de naturalidad (mismo modelo que el bot) ──────────────
+
+function chequearLogica({ paso, respuesta, tags, memoriaConv }) {
+    const fallos = [];
+    const t = String(respuesta || '');
+    const tagsSet = new Set(tags || []);
+
+    if (tagsSet.has('fecha_pasada') && /ayer/i.test(paso) && /horarios libres|tengo estos horarios|huecos tengo/i.test(t) && !/ya pasó|ya paso/i.test(t)) {
+        fallos.push('fecha pasada relistó horarios sin aclarar');
+    }
+    if (tagsSet.has('bot') && /eres un bot/i.test(paso) && !/asistente virtual|soy (el|un) (asistente|bot)/i.test(t)) {
+        fallos.push('no admitió ser asistente virtual');
+    }
+    if (tagsSet.has('humano') && !/avis|equipo|persona/i.test(t)) {
+        fallos.push('no escaló a humano');
+    }
+    if (tagsSet.has('ambiguo_multihora') && /ok sí|ok si/i.test(paso) && /quedó agendada|listo.*cita|apart/i.test(t) && !/cuál|cual/i.test(t)) {
+        fallos.push('agendó con ok sí ambiguo sin repregunta');
+    }
+    if (tagsSet.has('gracias') && paso.toLowerCase().includes('gracias') && /perfecto[!¡]/i.test(t)) {
+        fallos.push('respondió Perfecto a un gracias');
+    }
+    if (tagsSet.has('precio')) {
+        const montos = [...(t.match(/\d[\d.,]*/g) || [])].map(x => parseInt(x.replace(/\D/g, ''), 10)).filter(n => n > 0);
+        for (const m of montos) {
+            if (memoriaConv.precios && !memoriaConv.precios.has(m) && m > 10) {
+                fallos.push(`precio sospechoso ${m}`);
+                break;
+            }
+        }
+    }
+    return fallos;
+}
+
 async function juzgar({ empresaNombre, mensajeCliente, respuestaBot, respuestaAnterior }) {
     const Groq = require('groq-sdk');
     const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
@@ -193,71 +231,21 @@ async function juzgar({ empresaNombre, mensajeCliente, respuestaBot, respuestaAn
     }
 }
 
-// ── Guiones: un día normal para la clínica ─────────────────────
-function guiones({ servicio, dia1, dia2 }) {
+// ── Guiones ─────────────────────────────────────────────────
+function guiones({ servicio, dia1, dia2, profesional }) {
     const p = {
         servicio: servicio.nombre,
         fecha1: fechaLarga(dia1.fecha),
         fecha2: fechaLarga(dia2.fecha),
         hora1: dia1.horas[0],
-        hora2: dia2.horas[0]
+        hora2: (dia2.horas[1] || dia2.horas[0]),
+        profesional: profesional || null
     };
 
-    return [
-        {
-            nombre: 'Cliente agenda por primera vez',
-            pasos: [
-                `Buenas, soy Laura, quería pedir una cita de ${p.servicio} para el ${p.fecha1}, ¿me puede ayudar?`,
-                'Sí, la primera que tenga me sirve, gracias',
-                'Perfecto, gracias. Hasta luego'
-            ]
-        },
-        {
-            nombre: 'Cliente pregunta precio y elige hora concreta',
-            pasos: [
-                `Hola, soy Marcela. ¿Me puede decir cuánto cuesta una ${p.servicio}?`,
-                `¿Para el ${p.fecha1} qué horarios tienen?`,
-                `¿Tiene a las ${p.hora1}?`,
-                'Sí, agéndemela por favor',
-                'Listo, muchas gracias'
-            ]
-        },
-        {
-            nombre: 'Cliente confuso que no da detalles',
-            pasos: [
-                'hola?',
-                'necesito una cita lo más pronto posible',
-                'ok sí'
-            ]
-        },
-        {
-            nombre: 'Cliente pide un servicio que no existe',
-            pasos: [
-                'Hola, ¿hacen blanqueamiento con láser?',
-                `Ah ok, entonces mejor una ${p.servicio} para el ${p.fecha1}, lo que tengan`,
-                'Perfecto, sí'
-            ]
-        },
-        {
-            nombre: 'Cliente pide fecha pasada y luego cancela',
-            pasos: [
-                'Buenas, soy Jorge. Necesito una cita para el día de ayer',
-                'Sí, la más cercana que tenga',
-                'Espere... se me complicó. ¿Me la puede cancelar?',
-                'Gracias, quedo pendiente'
-            ]
-        },
-        {
-            nombre: 'Cliente que reprograma su cita',
-            pasos: [
-                `Hola, soy Camila, ¿me puede dar una cita de ${p.servicio} para el ${p.fecha1}?`,
-                'Sí, la primera',
-                `¿Me la puede cambiar para el ${p.fecha2}? A las ${p.hora2} si puede ser`,
-                'Listo, muchas gracias'
-            ]
-        }
-    ];
+    if (SET === 'validacion') return escenariosValidacion(p);
+    return escenariosAjuste(p);
 }
+
 
 // ── Reporte para revisión humana ───────────────────────────────
 // Escribe docs/INFORME-CONVERSACIONES.md con las conversaciones completas
@@ -352,6 +340,10 @@ function escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, con
         if (!servicios.length) throw new Error('La empresa no tiene servicios activos.');
         const servicio = servicios[0]; // día normal: el cliente pide el servicio principal
         const preciosValidos = new Set(servicios.map(s => parseInt(s.precio, 10)).filter(n => n > 0));
+        const { data: trabajadoresPrueba } = await supabase
+            .from('trabajadores').select('nombre').eq('empresa_id', empresa.id).eq('activo', true).limit(1);
+        const profesionalNombre = trabajadoresPrueba?.[0]?.nombre || null;
+        console.log(`Set: ${SET} | Corridas: ${CORRIDAS}`);
 
         // 3) Número de bot de prueba (fila inerte; se borra al final).
         let { data: filaBot } = await supabase
@@ -377,12 +369,15 @@ function escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, con
         console.log(`Disponibilidad real usada en los guiones: ${fechaLarga(dia1.fecha)} (${dia1.horas.join(', ')})\n`);
 
         // 5) Corrida de las conversaciones.
-        const guion = guiones({ servicio, dia1, dia2 });
+        const guion = guiones({ servicio, dia1, dia2, profesional: profesionalNombre });
         const resultados = [];
         let totalFallos = 0;
         let sumaNotas = 0;
         let conNota = 0;
 
+        const resultadosTodas = [];
+        for (let corrida = 1; corrida <= CORRIDAS; corrida++) {
+        if (CORRIDAS > 1) console.log(`\n### Corrida ${corrida}/${CORRIDAS}`);
         for (const conv of guion) {
             const telefono = telefonoFalso();
             telefonosFalsos.push(telefono);
@@ -434,6 +429,8 @@ function escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, con
             if (fallosConv) totalFallos += fallosConv;
             resultados.push({ nombre: conv.nombre, telefono, lineas, fallos: fallosConv });
         }
+
+        } // fin corridas
 
         // 6) Resumen final.
         console.log('='.repeat(70));
