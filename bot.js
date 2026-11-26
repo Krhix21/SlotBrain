@@ -14,6 +14,7 @@ const calendar = require('./calendar');
 const roles = require('./roles');
 const agenteDueno = require('./agenteDueno');
 const notificaciones = require('./notificaciones');
+const listaEspera = require('./listaEspera');
 const {
     formatearFechaLarga,
     formatearFechaCercana,
@@ -642,7 +643,7 @@ function leerPending(conv) {
     return pendiente;
 }
 
-function guardarPending(conv, { empresaId, servicio, fecha, hora, trabajadorId, slots, modoOferta }) {
+function guardarPending(conv, { empresaId, servicio, fecha, hora, trabajadorId, slots, modoOferta, horaOcupada }) {
     conv.pendingBooking = {
         empresaId,
         servicio: servicio.nombre,
@@ -651,6 +652,9 @@ function guardarPending(conv, { empresaId, servicio, fecha, hora, trabajadorId, 
         trabajadorId,
         slotsOfrecidos: slots,
         modoOferta: modoOferta || 'lista',
+        // Hora que el cliente pidió y estaba ocupada (solo en la oferta de
+        // "la más cercana"): sirve para ofrecerle la lista de espera después.
+        horaOcupada: horaOcupada || null,
         creadoEn: Date.now()
     };
 }
@@ -774,6 +778,7 @@ async function procesarToolCall({ nombre, argsCrudos, config, bot, conv, telefon
             const fechaTxt = formatearFechaCercana(resultado.fecha, zona);
             let modoOferta = 'lista';
             const nombreBit = estiloMod.sufijoPedirNombre(userName);
+            let horaOcupada = null;
 
             const horaPedida = horaConcretaDelTexto(textoCliente);
             if (horaPedida) {
@@ -788,6 +793,7 @@ async function procesarToolCall({ nombre, argsCrudos, config, bot, conv, telefon
                         primerSlot = cercano;
                         modoOferta = 'unica';
                         respuesta = `A las ${horaPedida} ya está reservada; la más cercana libre es a las ${cercano.hora}. ¿Te la aparto?${nombreBit}`;
+                        horaOcupada = horaPedida;
                     }
                 }
             }
@@ -813,7 +819,8 @@ async function procesarToolCall({ nombre, argsCrudos, config, bot, conv, telefon
                 slots: modoOferta === 'unica'
                     ? [`${primerSlot.trabajador_id}|${primerSlot.hora}`]
                     : resultado.slots.slice(0, 3).map(s => `${s.trabajador_id}|${s.hora}`),
-                modoOferta
+                modoOferta,
+                horaOcupada
             });
 
             return respuesta;
@@ -844,6 +851,23 @@ async function procesarToolCall({ nombre, argsCrudos, config, bot, conv, telefon
 
         if (!resultado.exitoso) return resultado.mensaje;
 
+        // Lista de espera: agendó una alternativa porque la hora que pidió
+        // estaba ocupada. Se le ofrece quedar en lista por si la hora
+        // original se libera (el SÍ/NO lo resuelve manejarRespuestaOferta).
+        let extraLista = '';
+        if (pendiente?.horaOcupada && pendiente.horaOcupada !== resultado.hora) {
+            conv.pendingOferta = {
+                tipo: 'pregunta',
+                fecha: pendiente.fecha,
+                horaDeseada: pendiente.horaOcupada,
+                servicioId: resultado.servicio?.id || null,
+                trabajadorId: resultado.trabajador?.id || null,
+                creadoEn: Date.now(),
+                expira: Date.now() + listaEspera.TTL_PREGUNTA_MS
+            };
+            extraLista = `\n\n¿Te dejo en la lista por si se libera la de las ${pendiente.horaOcupada}? Te escribo apenas se libre.`;
+        }
+
         memoria.guardar({
             empresaId: config.empresa.id,
             telefono: telefonoCliente,
@@ -860,7 +884,7 @@ async function procesarToolCall({ nombre, argsCrudos, config, bot, conv, telefon
             fecha: resultado.fecha,
             hora: resultado.hora,
             trabajador: resultado.trabajador,
-        });
+        }) + extraLista;
     }
 
     if (nombre === 'cancelar_cita') {
@@ -972,6 +996,86 @@ async function manejarRespuestaRecordatorio({ texto, conv, config, telefonoClien
         }
 
         return 'Entendido, liberé ese horario. ¿Qué día y servicio te acomodan para reagendar?';
+    }
+
+    return null;
+}
+
+// ============================================================
+// Lista de espera: SÍ/NO de la pregunta ("¿te dejo en la lista?")
+// y de la oferta de hueco liberado ("se liberó la cita que querías").
+// ============================================================
+
+function leerPendingOferta(conv) {
+    const p = conv.pendingOferta;
+    if (!p || !p.tipo) return null;
+    if (p.expira && Date.now() > Number(p.expira)) {
+        conv.pendingOferta = null;
+        return null;
+    }
+    return p;
+}
+
+// Detectores más anchos que los del flujo de reserva: aquí el cliente
+// acaba de recibir una pregunta de sí/no, así que "sí, déjame en la
+// lista" o "no gracias" también cuentan (esConfirmacionAfirmativa
+// estricta los dejaría caer al modelo, que no conoce la oferta).
+// Ojo: (?![a-z0-9]) y no \b — tras "í" el \b no funciona en JS.
+function respuestaListaAfirmativa(texto) {
+    return /^(s[ií]|si|claro|dale|ok|okey|va|de una|listo|perfecto|ap[úu]ntame|an[óo]tame|d[eé]jame)(?![a-z0-9])/i
+        .test(String(texto || '').trim())
+        && !respuestaListaNegativa(texto);
+}
+
+function respuestaListaNegativa(texto) {
+    return /^(no|nop|nel|mejor no|ahora no|nada)(?![a-z0-9])/i
+        .test(String(texto || '').trim());
+}
+
+async function manejarRespuestaOferta({ texto, conv, config, telefonoCliente }) {
+    const pendiente = leerPendingOferta(conv);
+    if (!pendiente) return null;
+
+    // La pregunta llega pegada a la confirmación de la cita: el cliente
+    // responde si quiere quedar en lista por la hora ocupada que pidió.
+    if (pendiente.tipo === 'pregunta') {
+        if (respuestaListaAfirmativa(texto)) {
+            const fila = await listaEspera.registrar({
+                empresaId: config.empresa.id,
+                servicioId: pendiente.servicioId || null,
+                trabajadorId: pendiente.trabajadorId || null,
+                fecha: pendiente.fecha,
+                horaDeseada: pendiente.horaDeseada,
+                telefonoCliente,
+                nombreCliente: conv.userName || null
+            });
+            conv.pendingOferta = null;
+            if (!fila) return null;
+
+            const fechaTxt = formatearFechaCercana(pendiente.fecha, config.empresa.zona_horaria || 'America/Bogota');
+            return `Listo, quedas en la lista por si se libera la del ${fechaTxt} a las ${pendiente.horaDeseada}. Te escribo apenas se libre.`;
+        }
+        if (respuestaListaNegativa(texto)) {
+            conv.pendingOferta = null;
+            return 'Va, sin problema.';
+        }
+        return null;
+    }
+
+    // La oferta: avisamos que se liberó el turno que quería.
+    if (pendiente.tipo === 'oferta') {
+        if (respuestaListaAfirmativa(texto)) {
+            const r = await listaEspera.confirmarOferta({ conv, config, telefonoCliente });
+            if (!r.exitoso) return r.mensaje;
+
+            const fechaTxt = formatearFechaCercana(r.fecha, config.empresa.zona_horaria || 'America/Bogota');
+            return `¡Listo! Te aparté la cita: ${r.servicio || 'tu servicio'} ${fechaTxt} a las ${r.hora} con ${r.profesional || 'nuestro equipo'}. Te esperamos.`;
+        }
+        if (respuestaListaNegativa(texto)) {
+            await listaEspera.rechazarOferta({ conv, config });
+            return 'Va, no hay problema. ¿Te agendo otra hora?';
+        }
+        return null;
     }
 
     return null;
@@ -1243,6 +1347,21 @@ async function procesarMensajeWhatsapp({ telefonoBot, phoneNumberId, telefonoCli
         });
         if (respReminder) {
             await enviar(respReminder);
+            await persistir();
+            return;
+        }
+
+        // Loop cerrado de lista de espera (pregunta del cliente y oferta
+        // de un hueco que se liberó). Antes del pending de reserva: el
+        // "sí" no puede chocar con una reserva pendiente.
+        const respOferta = await manejarRespuestaOferta({
+            texto,
+            conv,
+            config: cfg,
+            telefonoCliente: tel
+        });
+        if (respOferta) {
+            await enviar(respOferta);
             await persistir();
             return;
         }

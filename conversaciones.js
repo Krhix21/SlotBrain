@@ -22,6 +22,7 @@ const INTERVALO_BARRIDO_MS = 6 * 60 * 60 * 1000;
 
 let ultimoBarrido = 0;
 let columnasV11 = null;
+let columnasV12 = null;
 const pausasMemoria = new Map();
 
 function clavePausa(telefonoBot, id) {
@@ -36,6 +37,7 @@ function vacia() {
         pendingBooking: null,
         pendingReminder: null,
         pendingOwnerAction: null,
+        pendingOferta: null,
         botPausado: false,
         fallosEntendimiento: 0,
         bsuid: null,
@@ -56,23 +58,39 @@ function partirIdentidad(telefonoCliente, bsuid) {
 
 const SELECT_BASE = 'user_name, mensajes, ultima_cita, pending_booking, pending_reminder, pending_owner_action, bsuid, telefono_cliente';
 const SELECT_V11 = SELECT_BASE + ', bot_pausado, fallos_entendimiento';
+const SELECT_V12 = SELECT_V11 + ', pending_oferta';
 
 async function selectConversacion(filtro) {
-    const cols = columnasV11 === false ? SELECT_BASE : SELECT_V11;
-    let q = supabase.from('conversaciones').select(cols);
-    for (const [k, v] of Object.entries(filtro)) q = q.eq(k, v);
-    let { data, error } = await q.maybeSingle();
+    // Degradación por etapas: si falta una columna (base sin migrar), se
+    // reintenta sin ella en vez de romper toda la conversación.
+    for (let intento = 0; intento < 3; intento++) {
+        let cols = SELECT_BASE;
+        if (columnasV11 !== false) cols += ', bot_pausado, fallos_entendimiento';
+        if (columnasV12 !== false) cols += ', pending_oferta';
 
-    if (error && columnasV11 !== false && /bot_pausado|fallos_entendimiento|schema cache|does not exist/i.test(error.message)) {
-        columnasV11 = false;
-        q = supabase.from('conversaciones').select(SELECT_BASE);
+        let q = supabase.from('conversaciones').select(cols);
         for (const [k, v] of Object.entries(filtro)) q = q.eq(k, v);
-        ({ data, error } = await q.maybeSingle());
-    } else if (!error && columnasV11 !== false) {
-        columnasV11 = true;
-    }
+        const { data, error } = await q.maybeSingle();
 
-    return { data, error };
+        if (!error) return { data, error };
+
+        const msg = error.message || '';
+        if (columnasV12 !== false && /pending_oferta/i.test(msg)) {
+            columnasV12 = false;
+            continue;
+        }
+        if (columnasV11 !== false && /bot_pausado|fallos_entendimiento/i.test(msg)) {
+            columnasV11 = false;
+            continue;
+        }
+        if (/schema cache|does not exist/i.test(msg)) {
+            // El error no dice qué columna falta: se degrada de a una.
+            if (columnasV12 !== false) { columnasV12 = false; continue; }
+            if (columnasV11 !== false) { columnasV11 = false; continue; }
+        }
+        return { data, error };
+    }
+    return { data: null, error: null };
 }
 
 async function cargar(telefonoBot, telefonoCliente, opts = {}) {
@@ -119,6 +137,7 @@ async function cargar(telefonoBot, telefonoCliente, opts = {}) {
         pendingBooking: data.pending_booking || null,
         pendingReminder: data.pending_reminder || null,
         pendingOwnerAction: data.pending_owner_action || null,
+        pendingOferta: data.pending_oferta || null,
         botPausado: Boolean(data.bot_pausado ?? mem.botPausado),
         fallosEntendimiento: Number(data.fallos_entendimiento ?? mem.fallosEntendimiento) || 0,
         bsuid: data.bsuid || id.bsuid || null,
@@ -166,6 +185,11 @@ async function guardar(telefonoBot, telefonoCliente, conv) {
         fallos_entendimiento: Number(conv.fallosEntendimiento) || 0
     };
 
+    const filaV12 = {
+        ...filaV11,
+        pending_oferta: conv.pendingOferta || null
+    };
+
     async function upsert(fila) {
         if (id.telefonoCliente) {
             return supabase.from('conversaciones').upsert(fila, {
@@ -185,13 +209,34 @@ async function guardar(telefonoBot, telefonoCliente, conv) {
         return supabase.from('conversaciones').insert(fila);
     }
 
-    let { error } = await upsert(columnasV11 === false ? filaBase : filaV11);
+    let { error } = await upsert(columnasV12 === false
+        ? (columnasV11 === false ? filaBase : filaV11)
+        : filaV12);
 
-    if (error && columnasV11 !== false && /bot_pausado|fallos_entendimiento|schema cache|does not exist/i.test(error.message)) {
+    if (error && columnasV12 !== false && /pending_oferta/i.test(error.message)) {
+        columnasV12 = false;
+        ({ error } = await upsert(columnasV11 === false ? filaBase : filaV11));
+    }
+
+    if (error && columnasV11 !== false && /bot_pausado|fallos_entendimiento/i.test(error.message)) {
         columnasV11 = false;
         ({ error } = await upsert(filaBase));
-    } else if (!error && columnasV11 !== false) {
-        columnasV11 = true;
+    }
+
+    if (error && /schema cache|does not exist/i.test(error.message)) {
+        // El error no dice qué columna falta: se degrada de a una.
+        if (columnasV12 !== false) {
+            columnasV12 = false;
+            ({ error } = await upsert(columnasV11 === false ? filaBase : filaV11));
+        } else if (columnasV11 !== false) {
+            columnasV11 = false;
+            ({ error } = await upsert(filaBase));
+        }
+    }
+
+    if (!error) {
+        if (columnasV11 !== false) columnasV11 = true;
+        if (columnasV12 !== false) columnasV12 = true;
     }
 
     if (error) {

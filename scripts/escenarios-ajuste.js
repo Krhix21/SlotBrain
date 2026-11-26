@@ -60,6 +60,18 @@ function escenariosAjuste({ servicio, fecha1, fecha2, hora1, hora2 }) {
                 `¿Me la puede cambiar para el ${fecha2}? A las ${hora2} si puede ser`,
                 'Listo, muchas gracias'
             ]
+        },
+        {
+            // Pide una hora imposible (03:30), acepta la más cercana y queda
+            // en la lista de espera por si se libera la hora que quería.
+            nombre: 'Cliente pide hora ocupada y entra a la lista de espera',
+            tags: ['lista_espera', 'espera_cita'],
+            pasos: [
+                `Buenas, soy Diana. Quiero una ${servicio} para el ${fecha1} a las 03:30`,
+                'Va, apartémela',
+                'Sí, déjame en la lista',
+                'Listo, gracias'
+            ]
         }
     ];
 }

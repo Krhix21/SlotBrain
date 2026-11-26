@@ -376,6 +376,7 @@ function escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, con
         if (telsHuérfanos.length) {
             await supabase.from('citas').delete().in('telefono_cliente', telsHuérfanos);
             await supabase.from('conversaciones').delete().in('telefono_cliente', telsHuérfanos);
+            await supabase.from('lista_espera').delete().in('telefono_cliente', telsHuérfanos);
             marcarProgreso(`Limpieza previa: ${telsHuérfanos.length} teléfonos 5799…`);
         }
         await supabase.from('numeros_bot').delete().eq('phone_number_id', BOT_PRUEBA.phone_number_id);
@@ -529,6 +530,22 @@ function escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, con
                     console.log('  REGLAS  : espera_cita: no quedó registro de cita');
                 }
             }
+
+            if ((conv.tags || []).includes('lista_espera')) {
+                const { data: filaLista, error: eLista } = await supabase
+                    .from('lista_espera')
+                    .select('id, estado')
+                    .eq('telefono_cliente', telefono)
+                    .in('estado', ['activa', 'avisada', 'agendada'])
+                    .limit(1)
+                    .maybeSingle();
+                if (eLista) console.warn('count lista_espera:', eLista.message);
+                if (!filaLista) {
+                    fallosConv++;
+                    lineas.push({ paso: '(chequeo final)', respuesta: '(sin fila en lista_espera)', fallos: ['lista_espera: el cliente no quedó en la lista'], nota: null, motivo: '' });
+                    console.log('  REGLAS  : lista_espera: no quedó registro en la lista');
+                }
+            }
             resultados.push({ nombre: conv.nombre, nicho: nicho.id, corrida, telefono, lineas, fallos: fallosConv });
             resultadosTodas.push({ nombre: conv.nombre, nicho: nicho.id, corrida, fallos: fallosConv });
             marcarProgreso(`[${nicho.id} c${corrida}] ${conv.nombre}: ${fallosConv ? fallosConv + ' fallos' : 'OK'} (${resultadosTodas.length} hechas)`);
@@ -536,6 +553,153 @@ function escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, con
 
         } // fin corridas
         } // fin nichos
+
+        // 5b) Lista de espera: flujo determinista (sin LLM). Un cliente ocupa
+        //     un turno real, otro lo quería y quedó en lista; al cancelarse
+        //     llega el aviso y con un SÍ recupera el hueco. Más los dos casos
+        //     de falla: oferta vencida y NO que pasa al siguiente de la lista.
+        const lineasLista = [];
+        const fallosLista = [];
+        try {
+            marcarProgreso('Prueba lista de espera: inicio');
+            const listaEspera = require(path.join(__dirname, '..', 'listaEspera'));
+            const calendar = require(path.join(__dirname, '..', 'calendar'));
+
+            const rSlots = await disponibilidad.obtenerSlots({
+                empresa, servicios, fecha: dia2.fecha,
+                duracionMinutos: servicio.duracion_minutos || 60,
+                servicioId: servicio.id
+            });
+            const slotL = rSlots.slots[0];
+            if (!slotL) throw new Error('no hay slots para la prueba de lista de espera');
+            const trabajadorL = await disponibilidad.obtenerTrabajadores(empresa.id, false)
+                .then(lista => lista.find(t => t.id === slotL.trabajador_id));
+            if (!trabajadorL) throw new Error('no encontré al profesional del slot de lista de espera');
+
+            const pasoLista = async (tel, texto) => {
+                const antesMsg = enviados.length;
+                await bot.procesarMensajeWhatsapp({
+                    telefonoBot: datos.telefonoBot,
+                    phoneNumberId: datos.phoneNumberId,
+                    telefonoCliente: tel,
+                    texto,
+                    porVoz: false,
+                    messageId: null
+                });
+                return enviados.slice(antesMsg).map(e => e.texto).join(' | ');
+            };
+            const filaDe = async (tel) => {
+                const { data } = await supabase
+                    .from('lista_espera')
+                    .select('*')
+                    .eq('telefono_cliente', tel)
+                    .order('creado_en', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+                return data;
+            };
+            const registrarEnLista = (tel, nombre) => listaEspera.registrar({
+                empresaId: empresa.id,
+                servicioId: servicio.id,
+                trabajadorId: trabajadorL.id,
+                fecha: dia2.fecha,
+                horaDeseada: slotL.hora,
+                telefonoCliente: tel,
+                nombreCliente: nombre
+            });
+
+            // Caso 1: se libera el turno y el primero de la lista lo toma.
+            const telA = telefonoFalso(); telefonosFalsos.push(telA);
+            const telB = telefonoFalso(); telefonosFalsos.push(telB);
+            const citaA = await calendar.agendarCita({
+                empresa, trabajador: trabajadorL, servicio,
+                fecha: dia2.fecha, hora: slotL.hora,
+                telefonoCliente: telA, nombreCliente: 'Cliente A de prueba'
+            });
+            if (!citaA.exitoso) throw new Error('no pude agendar al cliente A: ' + citaA.mensaje);
+            await registrarEnLista(telB, 'Cliente B de prueba');
+
+            let antesMsg = enviados.length;
+            await calendar.cancelarCita({ empresa, trabajador: trabajadorL, cita: citaA.cita, canceladoPor: 'cliente' });
+            const avisoB = enviados.slice(antesMsg).map(e => e.texto).join(' | ');
+            let filaB = await filaDe(telB);
+            if (!/se liberó/i.test(avisoB) || filaB?.estado !== 'avisada') {
+                fallosLista.push(`aviso al cliente B: estado=${filaB?.estado || 'sin fila'}, aviso="${avisoB.slice(0, 80)}"`);
+            }
+
+            const respB = await pasoLista(telB, 'sí');
+            const { data: citaB } = await supabase
+                .from('citas').select('*').eq('telefono_cliente', telB).maybeSingle();
+            filaB = await filaDe(telB);
+            if (!citaB) fallosLista.push('el SÍ del cliente B no creó la cita');
+            if (filaB?.estado !== 'agendada') fallosLista.push(`fila de B quedó en ${filaB?.estado || 'nada'}, esperaba agendada`);
+            lineasLista.push({ paso: '(B responde SÍ a la oferta)', respuesta: respB, fallos: fallosLista.slice() });
+
+            // Caso 2: la oferta vence sin respuesta y el barrido la cierra.
+            const telC = telefonoFalso(); telefonosFalsos.push(telC);
+            await registrarEnLista(telC, 'Cliente C de prueba');
+            await calendar.cancelarCita({ empresa, trabajador: trabajadorL, cita: citaB, canceladoPor: 'cliente' });
+            let filaC = await filaDe(telC);
+            if (filaC?.estado !== 'avisada') fallosLista.push(`aviso al cliente C: estado=${filaC?.estado || 'sin fila'}`);
+
+            await supabase.from('lista_espera')
+                .update({ expira_oferta_en: new Date(Date.now() - 60_000).toISOString() })
+                .eq('id', filaC.id);
+            await listaEspera.barrerOfertasVencidas();
+            filaC = await filaDe(telC);
+            if (filaC?.estado !== 'vencida') fallosLista.push(`barrido: fila de C quedó en ${filaC?.estado || 'nada'}, esperaba vencida`);
+
+            const respC = await pasoLista(telC, 'sí');
+            const { data: citaC } = await supabase
+                .from('citas').select('*').eq('telefono_cliente', telC).maybeSingle();
+            if (citaC) fallosLista.push('el SÍ tarde del cliente C creó cita (debía rechazarse)');
+            if (!/venció/i.test(respC)) fallosLista.push(`respuesta al SÍ tardío no avisó del vencimiento: "${respC.slice(0, 80)}"`);
+            lineasLista.push({ paso: '(C responde SÍ cuando ya venció)', respuesta: respC, fallos: fallosLista.slice() });
+
+            // Caso 3: el primero dice NO y la oferta pasa al siguiente.
+            const telD = telefonoFalso(); telefonosFalsos.push(telD);
+            const citaD = await calendar.agendarCita({
+                empresa, trabajador: trabajadorL, servicio,
+                fecha: dia2.fecha, hora: slotL.hora,
+                telefonoCliente: telD, nombreCliente: 'Cliente D de prueba'
+            });
+            if (!citaD.exitoso) throw new Error('no pude agendar al cliente D: ' + citaD.mensaje);
+            const telE = telefonoFalso(); telefonosFalsos.push(telE);
+            const telF = telefonoFalso(); telefonosFalsos.push(telF);
+            await registrarEnLista(telE, 'Cliente E de prueba');
+            await registrarEnLista(telF, 'Cliente F de prueba');
+
+            await calendar.cancelarCita({ empresa, trabajador: trabajadorL, cita: citaD.cita, canceladoPor: 'cliente' });
+            const filaE = await filaDe(telE);
+            const filaF1 = await filaDe(telF);
+            if (filaE?.estado !== 'avisada') fallosLista.push(`primero de la lista: E quedó en ${filaE?.estado || 'sin fila'}, esperaba avisada`);
+            if (filaF1?.estado !== 'activa') fallosLista.push(`segundo de la lista: F quedó en ${filaF1?.estado || 'sin fila'}, esperaba activa (solo se avisa a uno)`);
+
+            await pasoLista(telE, 'no');
+            const filaE2 = await filaDe(telE);
+            const filaF2 = await filaDe(telF);
+            if (filaE2?.estado !== 'cancelada') fallosLista.push(`NO del cliente E: fila quedó en ${filaE2?.estado || 'nada'}, esperaba cancelada`);
+            if (filaF2?.estado !== 'avisada') fallosLista.push(`el NO no pasó al siguiente: F quedó en ${filaF2?.estado || 'nada'}, esperaba avisada`);
+
+            const respF = await pasoLista(telF, 'sí');
+            const { data: citaF } = await supabase
+                .from('citas').select('*').eq('telefono_cliente', telF).maybeSingle();
+            if (!citaF) fallosLista.push('el SÍ del cliente F no creó la cita');
+            lineasLista.push({ paso: '(F, el siguiente de la lista, responde SÍ)', respuesta: respF, fallos: fallosLista.slice() });
+
+            marcarProgreso(`Prueba lista de espera: ${fallosLista.length ? fallosLista.length + ' fallos' : 'OK'}`);
+        } catch (e) {
+            fallosLista.push('prueba de lista de espera: ' + e.message);
+        }
+        if (fallosLista.length) totalFallos += fallosLista.length;
+        resultados.push({
+            nombre: 'Lista de espera (liberación, vencimiento y NO)',
+            nicho: 'default',
+            corrida: 1,
+            telefono: '(flujo directo)',
+            lineas: lineasLista,
+            fallos: fallosLista.length
+        });
 
         // 6) Resumen final.
         console.log('='.repeat(70));
@@ -578,13 +742,14 @@ function escribirReporte({ empresa, servicio, dia1, dia2, resultados, media, con
             }
         } catch (_) {}
         if (!DEJAR_DATOS) {
-            // Limpieza: citas, conversaciones y el número de prueba.
+            // Limpieza: citas, conversaciones, lista de espera y el número de prueba.
             if (telefonosFalsos.length) {
                 await supabase.from('citas').delete().in('telefono_cliente', telefonosFalsos);
                 await supabase.from('conversaciones').delete().in('telefono_cliente', telefonosFalsos);
+                await supabase.from('lista_espera').delete().in('telefono_cliente', telefonosFalsos);
             }
             await supabase.from('numeros_bot').delete().eq('phone_number_id', BOT_PRUEBA.phone_number_id);
-            console.log(`\nLimpieza: datos de prueba borrados (citas y conversaciones de los teléfonos falsos, y el número ${BOT_PRUEBA.phone_number_id}).`);
+            console.log(`\nLimpieza: datos de prueba borrados (citas, conversaciones y lista de espera de los teléfonos falsos, y el número ${BOT_PRUEBA.phone_number_id}).`);
         }
     }
 })();

@@ -167,6 +167,20 @@ async function agendarCita({ empresa, trabajador, servicio, fecha, hora, telefon
         citaId = cita?.id;
     }
 
+    // Lista de espera: el hueco que se acaba de ocupar deja de estar en oferta.
+    try {
+        const listaEspera = require('./listaEspera');
+        await listaEspera.cerrarOfertasDeHueco({
+            empresaId: empresa.id,
+            trabajadorId: trabajador.id,
+            fecha,
+            hora,
+            telefonoCliente: telefonoCliente || null
+        });
+    } catch (error) {
+        console.warn('⚠️  Lista de espera (cierre):', error.message);
+    }
+
     return {
         exitoso: true,
         mensaje: `Cita confirmada para el ${fecha} a las ${hora}.`,
@@ -276,6 +290,20 @@ async function cancelarCita({ empresa, trabajador, cita, canceladoPor = 'cliente
 
     console.log(`🗑️  Cita cancelada: ${cita.fecha} ${cita.hora} (${nombreDeTrabajador(trabajador, empresa)})`);
 
+    // Lista de espera: este hueco quedó libre, se le ofrece al primero.
+    try {
+        const listaEspera = require('./listaEspera');
+        await listaEspera.revisarLiberacion({
+            empresa,
+            trabajador,
+            fecha: cita.fecha,
+            hora: cita.hora,
+            telefonoExcluido: cita.telefono_cliente || null
+        });
+    } catch (error) {
+        console.warn('⚠️  Lista de espera (liberación):', error.message);
+    }
+
     return {
         exitoso: true,
         mensaje: `Cita del ${cita.fecha} a las ${cita.hora} cancelada.`,
@@ -364,6 +392,20 @@ async function modificarCita({ empresa, trabajador, cita, nuevaFecha, nuevaHora 
     }
 
     console.log(`↪️  Cita movida: ${cita.fecha} ${cita.hora} → ${nuevaFecha} ${nuevaHora}`);
+
+    // Lista de espera: el hueco viejo quedó libre, se le ofrece al primero.
+    try {
+        const listaEspera = require('./listaEspera');
+        await listaEspera.revisarLiberacion({
+            empresa,
+            trabajador,
+            fecha: cita.fecha,
+            hora: cita.hora,
+            telefonoExcluido: cita.telefono_cliente || null
+        });
+    } catch (error) {
+        console.warn('⚠️  Lista de espera (liberación):', error.message);
+    }
 
     return {
         exitoso: true,
