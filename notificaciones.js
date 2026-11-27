@@ -4,6 +4,7 @@
 // Cada minuto:
 //   · recordatorio al profesional / cliente
 //   · digest matutino al propietario (1×/día)
+//   · barrido de ofertas de lista de espera vencidas (listaEspera.js)
 //
 // Al enviar recordatorio al cliente se setea conversaciones.pending_reminder
 // para el loop SÍ → confirmada / NO → reagenda (bot.js).
@@ -177,7 +178,9 @@ async function destinoDueno(empresaId) {
         .not('bsuid', 'is', null)
         .limit(1);
 
-    return (conBsuid && (conBsuid[0].telefono || conBsuid[0].bsuid)) || null;
+    // El propietario puede existir sin teléfono y sin bsuid: conBsuid llega
+    // como [] y conBsuid[0] sería undefined (crasheaba leyendo .telefono).
+    return (conBsuid && conBsuid[0] && (conBsuid[0].telefono || conBsuid[0].bsuid)) || null;
 }
 
 /**
@@ -409,6 +412,14 @@ async function revisar() {
         }
     }
 
+    // Lista de espera: ofertas cuya ventana ya venció pasan a 'vencida'.
+    try {
+        const listaEspera = require('./listaEspera');
+        await listaEspera.barrerOfertasVencidas();
+    } catch (error) {
+        console.warn('⚠️  Lista de espera (barrido):', error.message);
+    }
+
     await revisarDigestos();
 }
 
@@ -424,5 +435,6 @@ module.exports = {
     iniciar,
     revisar,
     avisarDueno,
-    registrarRespuestaCliente
+    registrarRespuestaCliente,
+    phoneNumberIdDe
 };

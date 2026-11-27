@@ -23,6 +23,35 @@ const HORARIO_POR_DEFECTO = {
 
 const ZONA_POR_DEFECTO = 'America/Bogota';
 
+// Reloj inyectable para pruebas reproducibles (null = hora real).
+let ahoraSimuladoMs = null;
+
+function setAhoraSimulado(isoOMs) {
+    if (isoOMs == null) {
+        ahoraSimuladoMs = null;
+        return;
+    }
+    if (typeof isoOMs === 'number') {
+        ahoraSimuladoMs = isoOMs;
+        return;
+    }
+    const t = Date.parse(String(isoOMs));
+    if (Number.isNaN(t)) throw new Error('setAhoraSimulado: fecha inválida');
+    ahoraSimuladoMs = t;
+}
+
+function limpiarAhoraSimulado() {
+    ahoraSimuladoMs = null;
+}
+
+function ahoraMs() {
+    return ahoraSimuladoMs == null ? Date.now() : ahoraSimuladoMs;
+}
+
+function ahoraDate() {
+    return new Date(ahoraMs());
+}
+
 /** "HH:MM" -> minutos desde medianoche. */
 function minutosDesdeHora(hhmm) {
     const [h, m] = String(hhmm || '0:0').split(':').map(Number);
@@ -58,7 +87,7 @@ function hoyEnZona(timeZone) {
         year: 'numeric',
         month: '2-digit',
         day: '2-digit'
-    }).format(new Date());
+    }).format(ahoraDate());
 }
 
 /** Hora actual "HH:MM" en la zona de la empresa. */
@@ -68,7 +97,7 @@ function horaAhoraEnZona(timeZone) {
         hour: '2-digit',
         minute: '2-digit',
         hour12: false
-    }).format(new Date());
+    }).format(ahoraDate());
 }
 
 /**
@@ -113,7 +142,8 @@ function zonedToUtc(fechaISO, hora, timeZone) {
     return new Date(instante);
 }
 
-/** "2026-09-28" -> "28 de septiembre de 2026" */
+/** "2026-09-28" -> "28 de septiembre" (el año solo se muestra si no es el actual:
+ *  nadie dice el año de una cita de esta semana) */
 function formatearFechaLarga(fechaISO) {
     const [a, m, d] = String(fechaISO).split('-').map(Number);
     const fecha = new Date(Date.UTC(a, m - 1, d, 12));
@@ -121,15 +151,36 @@ function formatearFechaLarga(fechaISO) {
     return new Intl.DateTimeFormat('es-CO', {
         day: 'numeric',
         month: 'long',
-        year: 'numeric',
+        ...(a !== new Date().getUTCFullYear() ? { year: 'numeric' } : {}),
         timeZone: 'UTC'
     }).format(fecha);
 }
 
-/** "2026-09-28" -> "28/09/2026" */
+/** Fechas próximas como las dice una persona: "hoy", "mañana", "el martes". */
+function formatearFechaCercana(fechaISO, timeZone) {
+    if (!esFechaValida(fechaISO)) return formatearFechaLarga(fechaISO);
+    const zona = timeZone || ZONA_POR_DEFECTO;
+    const hoy = hoyEnZona(zona);
+    if (fechaISO === hoy) return 'hoy';
+    if (fechaISO === sumarDias(hoy, 1)) return 'mañana';
+
+    const [a, m, d] = fechaISO.split('-').map(Number);
+    const objetivo = Date.UTC(a, m - 1, d, 12);
+    const [ha, hm, hd] = hoy.split('-').map(Number);
+    const base = Date.UTC(ha, hm - 1, hd, 12);
+    const dias = Math.round((objetivo - base) / 86400000);
+    if (dias >= 2 && dias <= 6) {
+        const nombre = new Intl.DateTimeFormat('es-CO', { weekday: 'long', timeZone: 'UTC' })
+            .format(new Date(objetivo));
+        return `el ${nombre}`;
+    }
+    return formatearFechaLarga(fechaISO);
+}
+
+/** "2026-09-28" -> "28/09" (o "28/09/2026" si el año no es el actual) */
 function formatearFechaCorta(fechaISO) {
     const [a, m, d] = String(fechaISO).split('-');
-    return `${d}/${m}/${a}`;
+    return Number(a) === new Date().getUTCFullYear() ? `${d}/${m}` : `${d}/${m}/${a}`;
 }
 
 /** "¿10:00" -> true si es una hora con formato HH:MM */
@@ -194,8 +245,13 @@ module.exports = {
     horaAhoraEnZona,
     zonedToUtc,
     formatearFechaLarga,
+    formatearFechaCercana,
     formatearFechaCorta,
     esHoraValida,
     normalizarHora,
-    esFechaValida
+    esFechaValida,
+    ahoraMs,
+    ahoraDate,
+    setAhoraSimulado,
+    limpiarAhoraSimulado
 };
