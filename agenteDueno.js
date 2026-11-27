@@ -92,7 +92,34 @@ const buscarClienteTool = {
     }
 };
 
-const TOOLS_DUENO = [verAgendaTool, marcarEstadoTool, crearBloqueoTool, buscarClienteTool];
+const rellenarHuecoTool = {
+    type: 'function',
+    function: {
+        name: 'rellenar_hueco',
+        description:
+            'Lista de espera: consulta quién espera un turno o envía a mano la oferta de un hueco ' +
+            'liberado al primero de la lista. Úsala cuando el dueño pregunte "¿hay alguien esperando ' +
+            'las 10?" o quiera rellenar un hueco vacío. Acción "ver" (default) lista los que esperan; ' +
+            '"ofertar" les envía el WhatsApp de "se liberó la cita que querías".',
+        parameters: {
+            type: 'object',
+            properties: {
+                fecha: { type: 'string', description: 'AAAA-MM-DD, "hoy" o "manana". Default hoy.' },
+                hora: { type: 'string', description: 'HH:MM del turno. Omitir = todas las horas.' },
+                profesional: { type: 'string', description: 'Nombre del profesional (opcional).' },
+                accion: { type: 'string', description: 'ver|ofertar. Default ver.' }
+            }
+        }
+    }
+};
+
+const TOOLS_DUENO = [
+    verAgendaTool,
+    marcarEstadoTool,
+    crearBloqueoTool,
+    buscarClienteTool,
+    rellenarHuecoTool
+];
 
 function zonaDe(empresa) {
     return empresa?.zona_horaria || 'America/Bogota';
@@ -425,6 +452,141 @@ async function ejecutarBuscarCliente({ empresa, rol, args }) {
     return { exitoso: true, mensaje: `Encontré ${lista.length}:\n${lineas.join('\n')}` };
 }
 
+/** La hora guardada en lista_espera es TIME: "10:00:00" → "10:00". */
+function horaDeFilaLista(hora) {
+    return String(hora || '').slice(0, 5);
+}
+
+/**
+ * Fase 2: el dueño puede ver quién espera un turno y disparar la
+ * oferta del hueco a mano (mismo punto que la liberación automática:
+ * listaEspera.revisarLiberacion revalida el slot antes de enviar).
+ */
+async function ejecutarRellenarHueco({ empresa, rol, args }) {
+    const listaEspera = require('./listaEspera');
+    const zona = zonaDe(empresa);
+    const fecha = resolverFechaRelativa(args.fecha, zona);
+    if (!esFechaValida(fecha)) {
+        return { exitoso: false, mensaje: 'No entendí la fecha. Usa hoy, mañana o AAAA-MM-DD.' };
+    }
+
+    const accion = String(args.accion || 'ver').toLowerCase().trim();
+    const hora = args.hora ? normalizarHora(args.hora) : null;
+
+    // Base: filas vivas de la lista para esa fecha.
+    let consulta = supabase
+        .from('lista_espera')
+        .select('id, nombre_cliente, telefono_cliente, hora_deseada, estado, expira_oferta_en, trabajador_id, trabajadores(nombre), servicios(nombre)')
+        .eq('empresa_id', empresa.id)
+        .eq('fecha', fecha)
+        .in('estado', ['activa', 'avisada'])
+        .order('creado_en', { ascending: true });
+
+    if (rol.tipo === 'trabajador' && rol.trabajadorId) {
+        consulta = consulta.or(`trabajador_id.eq.${rol.trabajadorId},trabajador_id.is.null`);
+    } else if (args.profesional) {
+        const lista = await listarTrabajadores(empresa.id);
+        const t = trabajadorPorNombre(lista, args.profesional);
+        if (!t) return { exitoso: false, mensaje: `No encontré al profesional "${args.profesional}".` };
+        consulta = consulta.or(`trabajador_id.eq.${t.id},trabajador_id.is.null`);
+    }
+
+    const { data, error } = await consulta;
+    if (error) {
+        console.error('❌ rellenar_hueco:', error.message);
+        return { exitoso: false, mensaje: 'No pude leer la lista de espera ahora.' };
+    }
+
+    let filas = data || [];
+    if (hora) {
+        filas = filas.filter(f => horaDeFilaLista(f.hora_deseada) === hora);
+    }
+
+    if (accion === 'ofertar') {
+        if (!hora) {
+            return { exitoso: false, mensaje: 'Para ofertar el hueco dime la hora (ej. 10:00).' };
+        }
+        if (!filas.length) {
+            return {
+                exitoso: true,
+                mensaje: `Nadie está en la lista de espera para ${formatearFechaLarga(fecha)} a las ${hora}.`
+            };
+        }
+
+        const yaAvisada = filas.find(f => f.estado === 'avisada');
+        if (yaAvisada) {
+            const quien = yaAvisada.nombre_cliente || yaAvisada.telefono_cliente;
+            const minutosRestantes = yaAvisada.expira_oferta_en
+                ? Math.max(1, Math.ceil((new Date(yaAvisada.expira_oferta_en).getTime() - Date.now()) / 60000))
+                : listaEspera.ventanaMinutos(empresa);
+            return {
+                exitoso: true,
+                mensaje: `Ya hay una oferta pendiente para ese turno: ${quien}. Expira en ${minutosRestantes} minuto(s); si no responde, la fila vuelve a estar disponible.`
+            };
+        }
+
+        const listaTrabajadores = await listarTrabajadores(empresa.id);
+        let trabajador = null;
+        if (rol.tipo === 'trabajador' && rol.trabajadorId) {
+            trabajador = listaTrabajadores.find(t => t.id === rol.trabajadorId) || null;
+        } else if (args.profesional) {
+            trabajador = trabajadorPorNombre(listaTrabajadores, args.profesional);
+        } else if (listaTrabajadores.length === 1) {
+            trabajador = listaTrabajadores[0];
+        }
+        if (!trabajador) {
+            return { exitoso: false, mensaje: 'Dime el nombre del profesional del hueco.' };
+        }
+
+        const enviado = await listaEspera.revisarLiberacion({ empresa, trabajador, fecha, hora });
+
+        await registrarAuditoria({
+            empresaId: empresa.id,
+            rol,
+            accion: 'rellenar_hueco',
+            detalle: { fecha, hora, profesional: trabajador.nombre, accion, enviado }
+        });
+
+        if (!enviado) {
+            return {
+                exitoso: false,
+                mensaje: 'No pude ofertar: el turno ya no está libre o el WhatsApp no salió. Revisa la agenda.'
+            };
+        }
+
+        const minutos = listaEspera.ventanaMinutos(empresa);
+        const siguiente = filas[0];
+        const quien = siguiente.nombre_cliente || siguiente.telefono_cliente;
+        return {
+            exitoso: true,
+            mensaje:
+                `Oferta enviada a ${quien} para ${formatearFechaLarga(fecha)} ${hora} ` +
+                `con ${trabajador.nombre}. Tiene ${minutos} minutos para responder.`
+        };
+    }
+
+    if (!filas.length) {
+        return {
+            exitoso: true,
+            mensaje: `Nadie está en la lista de espera para el ${formatearFechaLarga(fecha)}${hora ? ` a las ${hora}` : ''}.`
+        };
+    }
+
+    const lineas = filas.map(f => {
+        const prof = f.trabajadores?.nombre || 'cualquier profesional';
+        const serv = f.servicios?.nombre;
+        const quien = f.nombre_cliente ? `${f.nombre_cliente} (${f.telefono_cliente})` : f.telefono_cliente;
+        return `• ${horaDeFilaLista(f.hora_deseada)} — ${quien} — ${serv ? `${serv}, ` : ''}espera con ${prof} [${f.estado}]`;
+    });
+
+    return {
+        exitoso: true,
+        mensaje:
+            `Lista de espera del ${formatearFechaLarga(fecha)} (${filas.length}):\n${lineas.join('\n')}\n` +
+            'Si se libera uno de esos turnos, dime la hora y lo oferto.'
+    };
+}
+
 function leerPendingOwner(conv) {
     const p = conv.pendingOwnerAction;
     if (!p) return null;
@@ -477,6 +639,7 @@ async function procesarToolDueno({ nombre, args, empresa, rol, conv }) {
     if (nombre === 'marcar_estado_cita') return ejecutarMarcarEstado({ empresa, rol, args, conv });
     if (nombre === 'crear_bloqueo') return ejecutarCrearBloqueo({ empresa, rol, args, conv });
     if (nombre === 'buscar_cliente_agenda') return ejecutarBuscarCliente({ empresa, rol, args });
+    if (nombre === 'rellenar_hueco') return ejecutarRellenarHueco({ empresa, rol, args });
     return { exitoso: false, mensaje: 'No pude ejecutar esa acción.' };
 }
 
@@ -496,6 +659,7 @@ HERRAMIENTAS
 - marcar_estado_cita: confirmada / completada / no_asistio / cancelada
 - crear_bloqueo: ausencias
 - buscar_cliente_agenda: buscar por nombre o teléfono
+- rellenar_hueco: lista de espera; "ver" muestra quién espera un turno y "ofertar" envía la oferta del hueco liberado al primero de la lista
 
 REGLAS
 1. Español breve y claro. Sin mencionar tools ni JSON.
